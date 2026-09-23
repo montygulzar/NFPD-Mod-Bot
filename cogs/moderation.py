@@ -95,7 +95,7 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="ban", description="Permanently ban a member from this server")
     @app_commands.describe(member="The member to ban", reason="Why they're being banned")
     @commands.guild_only()
-    @has_tier("mod")
+    @has_tier("ban_perm")
     @commands.bot_has_permissions(ban_members=True)
     async def ban(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
         refusal = refusal_reason(ctx.author, member, self.bot.user.id)

@@ -3,9 +3,11 @@ from discord.ext import commands
 
 from config import (
     APPROVED_GUILD_IDS,
+    BAN_PERM_ROLE_IDS,
     BLOCKED_USER_IDS,
     CR_ROLE_IDS,
     DEVELOPMENT_ROLE_IDS,
+    MANAGEMENT_ROLE_IDS,
     MOD_ROLE_IDS,
     OWNER_IDS,
     OWNERSHIP_ROLE_IDS,
@@ -14,18 +16,22 @@ from config import (
 
 # Tier hierarchy, lowest to highest. Each tier grants access to everything
 # at its level and below.
-_TIERS = ("mod", "cr", "ownership", "development")
+_TIERS = ("mod", "ban_perm", "cr", "management", "ownership", "development")
 
 _TIER_ROLE_IDS: dict[str, set[int]] = {
     "mod": MOD_ROLE_IDS,
+    "ban_perm": BAN_PERM_ROLE_IDS,
     "cr": CR_ROLE_IDS,
+    "management": MANAGEMENT_ROLE_IDS,
     "ownership": OWNERSHIP_ROLE_IDS,
     "development": DEVELOPMENT_ROLE_IDS,
 }
 
 _TIER_LABELS: dict[str, str] = {
     "mod": "Moderator",
+    "ban_perm": "Ban Permission",
     "cr": "CR",
+    "management": "Management",
     "ownership": "Ownership",
     "development": "Development",
 }
@@ -39,7 +45,7 @@ def has_tier(tier: str):
     """Command check requiring the user to hold a role at *tier* or above.
 
     OWNER_IDS always pass. The tier hierarchy from lowest to highest is:
-    mod → cr → ownership → development.
+    mod → ban_perm → cr → management → ownership → development.
     """
     tier_index = _TIERS.index(tier)
     label = _TIER_LABELS[tier]

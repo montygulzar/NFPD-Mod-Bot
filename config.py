@@ -110,13 +110,15 @@ BRAND_NAME = os.environ.get("BRAND_NAME", "Moderation")
 OWNER_IDS = _parse_id_list("OWNER_IDS")
 
 # --- Tiered role system -------------------------------------------------------
-# Four tiers, each inheriting every tier below it:
-#   DEVELOPMENT > OWNERSHIP > CR > MOD
+# Six tiers, each inheriting every tier below it:
+#   DEVELOPMENT > OWNERSHIP > MANAGEMENT > CR > BAN_PERM > MOD
 #
 # A user with a role in a higher tier can use every command available to lower
 # tiers. OWNER_IDS (user IDs, not role IDs) bypass the tier system entirely.
 MOD_ROLE_IDS = _parse_id_list("MOD_ROLE_IDS")
+BAN_PERM_ROLE_IDS = _parse_id_list("BAN_PERM_ROLE_IDS")
 CR_ROLE_IDS = _parse_id_list("CR_ROLE_IDS", "GLOBAL_ACTION_ROLE_IDS", "GLOBAL_ACTION_ROLE_ID")
+MANAGEMENT_ROLE_IDS = _parse_id_list("MANAGEMENT_ROLE_IDS")
 OWNERSHIP_ROLE_IDS = _parse_id_list("OWNERSHIP_ROLE_IDS")
 DEVELOPMENT_ROLE_IDS = _parse_id_list("DEVELOPMENT_ROLE_IDS")
 

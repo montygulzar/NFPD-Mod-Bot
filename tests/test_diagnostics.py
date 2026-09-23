@@ -17,7 +17,9 @@ class TestValidateConfig:
             cfg.PROTECTED_USER_IDS = set()
             cfg.BLOCKED_USER_IDS = set()
             cfg.MOD_ROLE_IDS = {10}
+            cfg.BAN_PERM_ROLE_IDS = set()
             cfg.CR_ROLE_IDS = {10}
+            cfg.MANAGEMENT_ROLE_IDS = set()
             cfg.OWNERSHIP_ROLE_IDS = set()
             cfg.DEVELOPMENT_ROLE_IDS = set()
 
@@ -34,7 +36,9 @@ class TestValidateConfig:
             cfg.PROTECTED_USER_IDS = set()
             cfg.BLOCKED_USER_IDS = set()
             cfg.MOD_ROLE_IDS = {10}
+            cfg.BAN_PERM_ROLE_IDS = set()
             cfg.CR_ROLE_IDS = {10}
+            cfg.MANAGEMENT_ROLE_IDS = set()
             cfg.OWNERSHIP_ROLE_IDS = set()
             cfg.DEVELOPMENT_ROLE_IDS = set()
 
@@ -51,7 +55,9 @@ class TestValidateConfig:
             cfg.PROTECTED_USER_IDS = set()
             cfg.BLOCKED_USER_IDS = set()
             cfg.MOD_ROLE_IDS = set()
+            cfg.BAN_PERM_ROLE_IDS = set()
             cfg.CR_ROLE_IDS = set()
+            cfg.MANAGEMENT_ROLE_IDS = set()
             cfg.OWNERSHIP_ROLE_IDS = set()
             cfg.DEVELOPMENT_ROLE_IDS = set()
 
@@ -68,7 +74,9 @@ class TestValidateConfig:
             cfg.PROTECTED_USER_IDS = set()
             cfg.BLOCKED_USER_IDS = set()
             cfg.MOD_ROLE_IDS = {10}
+            cfg.BAN_PERM_ROLE_IDS = set()
             cfg.CR_ROLE_IDS = {10}
+            cfg.MANAGEMENT_ROLE_IDS = set()
             cfg.OWNERSHIP_ROLE_IDS = set()
             cfg.DEVELOPMENT_ROLE_IDS = set()
 

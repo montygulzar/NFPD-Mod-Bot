@@ -256,7 +256,9 @@ class Debug(commands.Cog):
             value=(
                 f"Owners configured: **{len(config.OWNER_IDS)}**\n"
                 f"Mod roles: **{len(config.MOD_ROLE_IDS)}**\n"
+                f"Ban Perm roles: **{len(config.BAN_PERM_ROLE_IDS)}**\n"
                 f"CR roles: **{len(config.CR_ROLE_IDS)}**\n"
+                f"Management roles: **{len(config.MANAGEMENT_ROLE_IDS)}**\n"
                 f"Ownership roles: **{len(config.OWNERSHIP_ROLE_IDS)}**\n"
                 f"Development roles: **{len(config.DEVELOPMENT_ROLE_IDS)}**\n"
                 f"Approved servers: **{len(config.APPROVED_GUILD_IDS) or 'all (no allowlist)'}**\n"

@@ -99,7 +99,7 @@ class GlobalModeration(commands.Cog):
     @commands.hybrid_command(name="globalkick", description="Kick a user from every server the bot shares with them")
     @app_commands.describe(user="The user to kick everywhere", reason="Why they're being kicked")
     @commands.guild_only()
-    @has_tier("cr")
+    @has_tier("management")
     @from_approved_guild()
     async def globalkick(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
         if await refuse_protected(ctx, user):
@@ -120,7 +120,7 @@ class GlobalModeration(commands.Cog):
     @commands.hybrid_command(name="globalban", description="Ban a user from every server the bot is in")
     @app_commands.describe(user="The user to ban everywhere", reason="Why they're being banned")
     @commands.guild_only()
-    @has_tier("cr")
+    @has_tier("management")
     @from_approved_guild()
     async def globalban(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
         if await refuse_protected(ctx, user):
@@ -141,7 +141,7 @@ class GlobalModeration(commands.Cog):
     @commands.hybrid_command(name="globalunban", description="Unban a user from every server the bot is in")
     @app_commands.describe(user="The user to unban everywhere", reason="Why they're being unbanned")
     @commands.guild_only()
-    @has_tier("cr")
+    @has_tier("management")
     @from_approved_guild()
     async def globalunban(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
         await ctx.defer()
@@ -160,7 +160,7 @@ class GlobalModeration(commands.Cog):
         reason="Why they're being muted",
     )
     @commands.guild_only()
-    @has_tier("cr")
+    @has_tier("management")
     @from_approved_guild()
     async def globalmute(
         self,
@@ -191,7 +191,7 @@ class GlobalModeration(commands.Cog):
     @commands.hybrid_command(name="globalunmute", description="Clear a user's timeout in every shared server")
     @app_commands.describe(user="The user to unmute everywhere", reason="Why they're being unmuted")
     @commands.guild_only()
-    @has_tier("cr")
+    @has_tier("management")
     @from_approved_guild()
     async def globalunmute(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
         await ctx.defer()
