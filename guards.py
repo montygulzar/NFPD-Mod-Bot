@@ -40,6 +40,15 @@ _TIER_LABELS: dict[str, str] = {
     "development": "Development",
 }
 
+_TIER_DENIALS: dict[str, str] = {
+    "mod": "Only members with **Moderator+** can use this command.",
+    "ban_perm": "Only members with **Ban Permissions+** can use this command.",
+    "cr": "Only users who are **Chief Ranks+** can use this command.",
+    "management": "Only users who are **Management Team+** can use this command.",
+    "ownership": "Only members with **Ownership+** can use this command.",
+    "development": "Can't use this shit lil boi, bot dev only.",
+}
+
 
 class BlockedUser(commands.CheckFailure):
     """Raised when someone on BLOCKED_USER_IDS tries to run any command."""
@@ -52,7 +61,7 @@ def has_tier(tier: str):
     mod → ban_perm → cr → management → ownership → development.
     """
     tier_index = _TIERS.index(tier)
-    label = _TIER_LABELS[tier]
+    denial = _TIER_DENIALS[tier]
 
     async def predicate(ctx: commands.Context) -> bool:
         if ctx.author.id in OWNER_IDS:
@@ -67,9 +76,7 @@ def has_tier(tier: str):
             if t in _TIER_ROLE_IDS and author_role_ids & _TIER_ROLE_IDS[t]:
                 return True
 
-        raise commands.CheckFailure(
-            f"Only members with **{label}+** can use this command."
-        )
+        raise commands.CheckFailure(denial)
 
     return commands.check(predicate)
 
