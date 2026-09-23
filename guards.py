@@ -33,9 +33,9 @@ _TIER_USER_IDS: dict[str, set[int]] = {
 
 _TIER_LABELS: dict[str, str] = {
     "mod": "Moderator",
-    "ban_perm": "Ban Permission",
-    "cr": "CR",
-    "management": "Management",
+    "ban_perm": "Ban Permissions",
+    "cr": "Chief Ranks",
+    "management": "Management Team",
     "ownership": "Ownership",
     "development": "Development",
 }
@@ -68,7 +68,7 @@ def has_tier(tier: str):
                 return True
 
         raise commands.CheckFailure(
-            f"This command requires the **{label}** role or higher."
+            f"Only members with **{label}+** can use this command."
         )
 
     return commands.check(predicate)
