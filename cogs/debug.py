@@ -260,7 +260,7 @@ class Debug(commands.Cog):
                 f"CR roles: **{len(config.CR_ROLE_IDS)}**\n"
                 f"Management roles: **{len(config.MANAGEMENT_ROLE_IDS)}**\n"
                 f"Ownership roles: **{len(config.OWNERSHIP_ROLE_IDS)}**\n"
-                f"Development roles: **{len(config.DEVELOPMENT_ROLE_IDS)}**\n"
+                f"Development users: **{len(config.DEVELOPMENT_USER_IDS)}**\n"
                 f"Approved servers: **{len(config.APPROVED_GUILD_IDS) or 'all (no allowlist)'}**\n"
                 f"Global-exempt servers: **{len(config.GLOBAL_ACTION_EXEMPT_GUILD_IDS) or 'none'}**\n"
                 f"Auto-leave unapproved: **{config.LEAVE_UNAPPROVED_GUILDS}**\n"

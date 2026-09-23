@@ -6,7 +6,7 @@ from config import (
     BAN_PERM_ROLE_IDS,
     BLOCKED_USER_IDS,
     CR_ROLE_IDS,
-    DEVELOPMENT_ROLE_IDS,
+    DEVELOPMENT_USER_IDS,
     MANAGEMENT_ROLE_IDS,
     MOD_ROLE_IDS,
     OWNER_IDS,
@@ -24,7 +24,11 @@ _TIER_ROLE_IDS: dict[str, set[int]] = {
     "cr": CR_ROLE_IDS,
     "management": MANAGEMENT_ROLE_IDS,
     "ownership": OWNERSHIP_ROLE_IDS,
-    "development": DEVELOPMENT_ROLE_IDS,
+}
+
+# Tiers checked by user ID instead of role ID.
+_TIER_USER_IDS: dict[str, set[int]] = {
+    "development": DEVELOPMENT_USER_IDS,
 }
 
 _TIER_LABELS: dict[str, str] = {
@@ -58,7 +62,9 @@ def has_tier(tier: str):
 
         author_role_ids = {role.id for role in ctx.author.roles}
         for t in _TIERS[tier_index:]:
-            if author_role_ids & _TIER_ROLE_IDS[t]:
+            if t in _TIER_USER_IDS and ctx.author.id in _TIER_USER_IDS[t]:
+                return True
+            if t in _TIER_ROLE_IDS and author_role_ids & _TIER_ROLE_IDS[t]:
                 return True
 
         raise commands.CheckFailure(

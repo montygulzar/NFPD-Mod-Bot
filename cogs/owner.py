@@ -1,8 +1,9 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from config import APPROVED_GUILD_IDS
-from embeds import NEUTRAL_COLOR, base_embed, build_notice_embed, clamp
+from embeds import NEUTRAL_COLOR, audit_reason, base_embed, build_notice_embed, clamp
 from guards import has_tier
 
 GUILDS_PER_EMBED = 10
@@ -75,6 +76,29 @@ class Owner(commands.Cog):
                 f"{(len(guilds) - 1) // GUILDS_PER_EMBED + 1}"
             )
             await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="addrole", description="Add a role to a member")
+    @app_commands.describe(member="The member to give the role to", role="The role to add", reason="Why")
+    @commands.guild_only()
+    @has_tier("development")
+    @commands.bot_has_permissions(manage_roles=True)
+    async def addrole(
+        self,
+        ctx: commands.Context,
+        member: discord.Member,
+        role: discord.Role,
+        *,
+        reason: str = "No reason provided",
+    ):
+        if role >= ctx.guild.me.top_role:
+            await ctx.send(embed=build_notice_embed("That role is at or above my highest role.", success=False))
+            return
+        if role in member.roles:
+            await ctx.send(embed=build_notice_embed(f"{member.mention} already has that role.", success=False))
+            return
+
+        await member.add_roles(role, reason=audit_reason(ctx.author, "Add role", reason))
+        await ctx.send(embed=build_notice_embed(f"Added **{role.name}** to {member.mention}."))
 
 
 async def setup(bot: commands.Bot):

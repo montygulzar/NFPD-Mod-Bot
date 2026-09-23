@@ -115,12 +115,13 @@ OWNER_IDS = _parse_id_list("OWNER_IDS")
 #
 # A user with a role in a higher tier can use every command available to lower
 # tiers. OWNER_IDS (user IDs, not role IDs) bypass the tier system entirely.
+# DEVELOPMENT_USER_IDS is checked by user ID (like OWNER_IDS), not by role.
 MOD_ROLE_IDS = _parse_id_list("MOD_ROLE_IDS")
 BAN_PERM_ROLE_IDS = _parse_id_list("BAN_PERM_ROLE_IDS")
 CR_ROLE_IDS = _parse_id_list("CR_ROLE_IDS", "GLOBAL_ACTION_ROLE_IDS", "GLOBAL_ACTION_ROLE_ID")
 MANAGEMENT_ROLE_IDS = _parse_id_list("MANAGEMENT_ROLE_IDS")
 OWNERSHIP_ROLE_IDS = _parse_id_list("OWNERSHIP_ROLE_IDS")
-DEVELOPMENT_ROLE_IDS = _parse_id_list("DEVELOPMENT_ROLE_IDS")
+DEVELOPMENT_USER_IDS = _parse_id_list("DEVELOPMENT_USER_IDS")
 
 # Backward-compat alias so existing code referencing GLOBAL_ACTION_ROLE_IDS
 # (e.g. diagnostics) keeps working without changes.
