@@ -157,7 +157,7 @@ def describe_error(error: BaseException) -> tuple[str, bool]:
             True,
         )
     if isinstance(error, commands.CheckFailure):
-        return "That command is restricted to global moderators.", False
+        return str(error) if str(error) else "You don't have permission to use that.", False
     if isinstance(error, discord.Forbidden):
         return "Discord refused that action. Check my permissions and that my role sits above the target's.", False
     if isinstance(error, commands.MissingRequiredArgument):

@@ -3,7 +3,7 @@ from discord.ext import commands
 
 from config import APPROVED_GUILD_IDS
 from embeds import NEUTRAL_COLOR, base_embed, build_notice_embed, clamp
-from guards import is_bot_owner
+from guards import has_tier
 
 GUILDS_PER_EMBED = 10
 
@@ -35,7 +35,7 @@ class Owner(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="servers", description="List every server this bot is in, with invites")
-    @is_bot_owner()
+    @has_tier("development")
     async def servers(self, ctx: commands.Context):
         await ctx.defer()
 

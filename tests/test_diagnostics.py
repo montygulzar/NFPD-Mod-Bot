@@ -16,7 +16,10 @@ class TestValidateConfig:
             cfg.COMMAND_PREFIX = "!"
             cfg.PROTECTED_USER_IDS = set()
             cfg.BLOCKED_USER_IDS = set()
-            cfg.GLOBAL_ACTION_ROLE_IDS = {10}
+            cfg.MOD_ROLE_IDS = {10}
+            cfg.CR_ROLE_IDS = {10}
+            cfg.OWNERSHIP_ROLE_IDS = set()
+            cfg.DEVELOPMENT_ROLE_IDS = set()
 
             warnings = diagnostics.validate_config()
             assert any("GLOBAL_ACTION_EXEMPT_GUILD_IDS" in w for w in warnings)
@@ -30,7 +33,10 @@ class TestValidateConfig:
             cfg.COMMAND_PREFIX = "!"
             cfg.PROTECTED_USER_IDS = set()
             cfg.BLOCKED_USER_IDS = set()
-            cfg.GLOBAL_ACTION_ROLE_IDS = {10}
+            cfg.MOD_ROLE_IDS = {10}
+            cfg.CR_ROLE_IDS = {10}
+            cfg.OWNERSHIP_ROLE_IDS = set()
+            cfg.DEVELOPMENT_ROLE_IDS = set()
 
             warnings = diagnostics.validate_config()
             assert not any("GLOBAL_ACTION_EXEMPT_GUILD_IDS" in w for w in warnings)
@@ -44,7 +50,10 @@ class TestValidateConfig:
             cfg.COMMAND_PREFIX = "!"
             cfg.PROTECTED_USER_IDS = set()
             cfg.BLOCKED_USER_IDS = set()
-            cfg.GLOBAL_ACTION_ROLE_IDS = set()
+            cfg.MOD_ROLE_IDS = set()
+            cfg.CR_ROLE_IDS = set()
+            cfg.OWNERSHIP_ROLE_IDS = set()
+            cfg.DEVELOPMENT_ROLE_IDS = set()
 
             warnings = diagnostics.validate_config()
             assert any("OWNER_IDS" in w for w in warnings)
@@ -58,7 +67,10 @@ class TestValidateConfig:
             cfg.COMMAND_PREFIX = "!"
             cfg.PROTECTED_USER_IDS = set()
             cfg.BLOCKED_USER_IDS = set()
-            cfg.GLOBAL_ACTION_ROLE_IDS = {10}
+            cfg.MOD_ROLE_IDS = {10}
+            cfg.CR_ROLE_IDS = {10}
+            cfg.OWNERSHIP_ROLE_IDS = set()
+            cfg.DEVELOPMENT_ROLE_IDS = set()
 
             warnings = diagnostics.validate_config()
             assert any("LEAVE_UNAPPROVED_GUILDS" in w for w in warnings)

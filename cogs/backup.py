@@ -1,9 +1,9 @@
 """Server backup and restore.
 
 /backupserver  - Snapshots all roles, channels, and permissions into a JSON file
-                 and attaches it to the channel. Requires Manage Guild.
+                 and attaches it to the channel. Requires Ownership tier.
 /restorebackup - Reads the most recent backup file and recreates any roles or
-                 channels that no longer exist. Requires Administrator.
+                 channels that no longer exist. Requires Ownership tier.
 
 Backups are intentionally JSON files (not a database table) so they can be kept
 offline and applied to a fresh server without needing database access.
@@ -21,6 +21,7 @@ from discord.ext import commands
 import embeds as embeds_module
 from config import BRAND_NAME
 from embeds import DANGER_COLOR, NEUTRAL_COLOR, SUCCESS_COLOR, base_embed, build_notice_embed, clamp
+from guards import has_tier
 from views import ConfirmView
 
 
@@ -197,7 +198,7 @@ class Backup(commands.Cog):
 
     @commands.hybrid_command(name="backupserver", description="Snapshot all server roles and channels to a JSON file")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     @commands.bot_has_permissions(manage_guild=True)
     async def backupserver(self, ctx: commands.Context) -> None:
         await ctx.defer()
@@ -235,7 +236,7 @@ class Backup(commands.Cog):
     )
     @app_commands.describe(backup_file="The .json backup file created by /backupserver")
     @commands.guild_only()
-    @commands.has_permissions(administrator=True)
+    @has_tier("ownership")
     @commands.bot_has_permissions(manage_roles=True, manage_channels=True)
     async def restorebackup(self, ctx: commands.Context, backup_file: discord.Attachment) -> None:
         if not backup_file.filename.endswith(".json"):

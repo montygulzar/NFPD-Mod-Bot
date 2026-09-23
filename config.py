@@ -109,8 +109,20 @@ BRAND_NAME = os.environ.get("BRAND_NAME", "Moderation")
 
 OWNER_IDS = _parse_id_list("OWNER_IDS")
 
-# Accepts several roles. GLOBAL_ACTION_ROLE_ID is the older single-value name, still read as a fallback.
-GLOBAL_ACTION_ROLE_IDS = _parse_id_list("GLOBAL_ACTION_ROLE_IDS", "GLOBAL_ACTION_ROLE_ID")
+# --- Tiered role system -------------------------------------------------------
+# Four tiers, each inheriting every tier below it:
+#   DEVELOPMENT > OWNERSHIP > CR > MOD
+#
+# A user with a role in a higher tier can use every command available to lower
+# tiers. OWNER_IDS (user IDs, not role IDs) bypass the tier system entirely.
+MOD_ROLE_IDS = _parse_id_list("MOD_ROLE_IDS")
+CR_ROLE_IDS = _parse_id_list("CR_ROLE_IDS", "GLOBAL_ACTION_ROLE_IDS", "GLOBAL_ACTION_ROLE_ID")
+OWNERSHIP_ROLE_IDS = _parse_id_list("OWNERSHIP_ROLE_IDS")
+DEVELOPMENT_ROLE_IDS = _parse_id_list("DEVELOPMENT_ROLE_IDS")
+
+# Backward-compat alias so existing code referencing GLOBAL_ACTION_ROLE_IDS
+# (e.g. diagnostics) keeps working without changes.
+GLOBAL_ACTION_ROLE_IDS = CR_ROLE_IDS
 
 # Servers that global actions may be run from and applied to. Leaving this empty means
 # global actions reach EVERY server the bot is in, including ones added without your knowledge.

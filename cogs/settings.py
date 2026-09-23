@@ -11,6 +11,7 @@ from database import (
     set_warn_thresholds,
 )
 from embeds import NEUTRAL_COLOR, base_embed, build_notice_embed
+from guards import has_tier
 from modlog import _resolve_channel, check_log_channel, check_server_log_channel
 
 MAX_TIMEOUT_MINUTES = 40320  # Discord's own cap on a timeout: 28 days
@@ -33,7 +34,7 @@ class Settings(commands.Cog):
 
     @commands.hybrid_command(name="settings", description="Show this server's moderation configuration")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def settings(self, ctx: commands.Context):
         config = await get_guild_settings(ctx.guild.id)
         lockdown_role_ids = await get_lockdown_role_ids(ctx.guild.id)
@@ -78,7 +79,7 @@ class Settings(commands.Cog):
     @commands.hybrid_command(name="setlogchannel", description="Set where moderation cases are logged")
     @app_commands.describe(channel="Channel for ban/kick/warn/mute case logs")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def setlogchannel(self, ctx: commands.Context, channel: discord.TextChannel):
         await set_log_channel(ctx.guild.id, channel.id)
         ok, detail = await check_log_channel(ctx.guild)
@@ -93,7 +94,7 @@ class Settings(commands.Cog):
     )
     @app_commands.describe(channel="Channel for server event logs, or leave blank to use the mod-log channel")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def setserverlogchannel(
         self,
         ctx: commands.Context,
@@ -112,7 +113,7 @@ class Settings(commands.Cog):
 
     @commands.hybrid_command(name="testlog", description="Send a test message to the configured mod-log channel")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def testlog(self, ctx: commands.Context):
         ok, detail = await check_log_channel(ctx.guild)
         if not ok:
@@ -135,7 +136,7 @@ class Settings(commands.Cog):
 
     @commands.hybrid_command(name="testserverlog", description="Send a test message to the server-log channel")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def testserverlog(self, ctx: commands.Context):
         ok, detail = await check_server_log_channel(ctx.guild)
         if not ok:
@@ -163,7 +164,7 @@ class Settings(commands.Cog):
     )
     @app_commands.describe(minimum_account_age_hours="Minimum account age in hours, or 0 to disable")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def setraidprotection(self, ctx: commands.Context, minimum_account_age_hours: int):
         if minimum_account_age_hours < 0:
             await ctx.send(embed=build_notice_embed("Minimum account age can't be negative.", success=False))
@@ -191,7 +192,7 @@ class Settings(commands.Cog):
         ban_at="Warn count that triggers an automatic ban (0 to disable)",
     )
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def setwarnthresholds(
         self,
         ctx: commands.Context,

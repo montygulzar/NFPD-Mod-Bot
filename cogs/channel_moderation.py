@@ -13,6 +13,7 @@ from database import (
     save_channel_lock,
 )
 from embeds import MUTED_COLOR, NEUTRAL_COLOR, SUCCESS_COLOR, base_embed, build_notice_embed, clamp
+from guards import has_tier
 from modlog import post_to_log_channel
 
 MAX_SLOWMODE_SECONDS = 21600  # Discord's own cap: 6 hours
@@ -46,7 +47,7 @@ class ChannelModeration(commands.Cog):
         channel="Channel to apply to, defaults to the current one",
     )
     @commands.guild_only()
-    @commands.has_permissions(manage_channels=True)
+    @has_tier("ownership")
     @commands.bot_has_permissions(manage_channels=True)
     async def slowmode(
         self,
@@ -69,7 +70,7 @@ class ChannelModeration(commands.Cog):
         member="Only delete messages from this member",
     )
     @commands.guild_only()
-    @commands.has_permissions(manage_messages=True)
+    @has_tier("ownership")
     @commands.bot_has_permissions(manage_messages=True, read_message_history=True)
     async def purge(
         self,
@@ -114,7 +115,7 @@ class ChannelModeration(commands.Cog):
         reason="Why the channel is being locked",
     )
     @commands.guild_only()
-    @commands.has_permissions(manage_channels=True)
+    @has_tier("ownership")
     @commands.bot_has_permissions(manage_channels=True)
     async def lockdown(
         self,
@@ -157,7 +158,7 @@ class ChannelModeration(commands.Cog):
     @commands.hybrid_command(name="unlock", description="Restore configured roles' ability to send messages")
     @app_commands.describe(channel="Channel to unlock, defaults to the current one")
     @commands.guild_only()
-    @commands.has_permissions(manage_channels=True)
+    @has_tier("ownership")
     @commands.bot_has_permissions(manage_channels=True)
     async def unlock(self, ctx: commands.Context, channel: Optional[discord.TextChannel] = None):
         target = channel or ctx.channel
@@ -211,7 +212,7 @@ class ChannelModeration(commands.Cog):
     @commands.hybrid_command(name="addlockdownrole", description="Add a role to the lockdown list")
     @app_commands.describe(role="The role that will be silenced during lockdowns")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def addlockdownrole(self, ctx: commands.Context, role: discord.Role):
         await add_lockdown_role(ctx.guild.id, role.id)
         current_ids = await get_lockdown_role_ids(ctx.guild.id)
@@ -224,7 +225,7 @@ class ChannelModeration(commands.Cog):
     @commands.hybrid_command(name="removelockdownrole", description="Remove a role from the lockdown list")
     @app_commands.describe(role="The role to remove from the lockdown list")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def removelockdownrole(self, ctx: commands.Context, role: discord.Role):
         removed = await remove_lockdown_role(ctx.guild.id, role.id)
         if not removed:
@@ -239,7 +240,7 @@ class ChannelModeration(commands.Cog):
 
     @commands.hybrid_command(name="clearlockdownroles", description="Clear all lockdown roles (resets to @everyone)")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     async def clearlockdownroles(self, ctx: commands.Context):
         await clear_lockdown_roles(ctx.guild.id)
         await ctx.send(embed=build_notice_embed("All lockdown roles cleared. /lockdown now silences @everyone."))

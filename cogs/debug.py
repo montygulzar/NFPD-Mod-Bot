@@ -19,7 +19,7 @@ import config
 import database
 import diagnostics
 from embeds import NEUTRAL_COLOR, base_embed, clamp
-from guards import is_bot_owner
+from guards import has_tier
 from modlog import check_log_channel
 
 try:
@@ -64,8 +64,8 @@ class Debug(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="debug", description="Full diagnostic report. Owner-only.")
-    @is_bot_owner()
+    @commands.hybrid_command(name="debug", description="Full diagnostic report. Development tier.")
+    @has_tier("development")
     async def debug(self, ctx: commands.Context):
         await ctx.defer(ephemeral=True)
         embeds = [
@@ -77,7 +77,7 @@ class Debug(commands.Cog):
         await ctx.send(embeds=embeds, ephemeral=True)
 
     @commands.hybrid_command(name="health", description="Quick liveness summary: database, gateway, uptime.")
-    @is_bot_owner()
+    @has_tier("development")
     async def health(self, ctx: commands.Context):
         """The short version of /debug, for a fast check that everything is up."""
         await ctx.defer(ephemeral=True)
@@ -255,7 +255,10 @@ class Debug(commands.Cog):
             name="Access control",
             value=(
                 f"Owners configured: **{len(config.OWNER_IDS)}**\n"
-                f"Global-mod roles configured: **{len(config.GLOBAL_ACTION_ROLE_IDS)}**\n"
+                f"Mod roles: **{len(config.MOD_ROLE_IDS)}**\n"
+                f"CR roles: **{len(config.CR_ROLE_IDS)}**\n"
+                f"Ownership roles: **{len(config.OWNERSHIP_ROLE_IDS)}**\n"
+                f"Development roles: **{len(config.DEVELOPMENT_ROLE_IDS)}**\n"
                 f"Approved servers: **{len(config.APPROVED_GUILD_IDS) or 'all (no allowlist)'}**\n"
                 f"Global-exempt servers: **{len(config.GLOBAL_ACTION_EXEMPT_GUILD_IDS) or 'none'}**\n"
                 f"Auto-leave unapproved: **{config.LEAVE_UNAPPROVED_GUILDS}**\n"

@@ -6,7 +6,7 @@ from discord.ext import commands
 
 from database import add_temp_ban, get_guild_settings, get_warn_count, remove_temp_ban
 from embeds import audit_reason, build_ban_dm_embed, build_dm_notice_embed, build_notice_embed
-from guards import refusal_reason
+from guards import has_tier, refusal_reason
 from modlog import announce_case, record_case, try_dm
 from views import BanAppealView
 
@@ -76,7 +76,7 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="kick", description="Kick a member from this server")
     @app_commands.describe(member="The member to kick", reason="Why they're being kicked")
     @commands.guild_only()
-    @commands.has_permissions(kick_members=True)
+    @has_tier("mod")
     @commands.bot_has_permissions(kick_members=True)
     async def kick(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
         refusal = refusal_reason(ctx.author, member, self.bot.user.id)
@@ -95,7 +95,7 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="ban", description="Permanently ban a member from this server")
     @app_commands.describe(member="The member to ban", reason="Why they're being banned")
     @commands.guild_only()
-    @commands.has_permissions(ban_members=True)
+    @has_tier("mod")
     @commands.bot_has_permissions(ban_members=True)
     async def ban(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
         refusal = refusal_reason(ctx.author, member, self.bot.user.id)
@@ -119,7 +119,7 @@ class Moderation(commands.Cog):
         reason="Why they're being banned",
     )
     @commands.guild_only()
-    @commands.has_permissions(ban_members=True)
+    @has_tier("mod")
     @commands.bot_has_permissions(ban_members=True)
     async def tempban(
         self,
@@ -154,7 +154,7 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="unban", description="Unban a user from this server")
     @app_commands.describe(user="The user to unban", reason="Why they're being unbanned")
     @commands.guild_only()
-    @commands.has_permissions(ban_members=True)
+    @has_tier("mod")
     @commands.bot_has_permissions(ban_members=True)
     async def unban(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
         await ctx.defer()
@@ -173,7 +173,7 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="warn", description="Warn a member")
     @app_commands.describe(member="The member to warn", reason="Why they're being warned")
     @commands.guild_only()
-    @commands.has_permissions(kick_members=True)
+    @has_tier("mod")
     async def warn(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
         refusal = refusal_reason(ctx.author, member, self.bot.user.id, check_hierarchy=False)
         if refusal:
@@ -194,7 +194,7 @@ class Moderation(commands.Cog):
         reason="Why they're being muted",
     )
     @commands.guild_only()
-    @commands.has_permissions(moderate_members=True)
+    @has_tier("mod")
     @commands.bot_has_permissions(moderate_members=True)
     async def mute(
         self,
@@ -225,7 +225,7 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="unmute", description="Remove an active timeout from a member")
     @app_commands.describe(member="The member to unmute", reason="Why they're being unmuted")
     @commands.guild_only()
-    @commands.has_permissions(moderate_members=True)
+    @has_tier("mod")
     @commands.bot_has_permissions(moderate_members=True)
     async def unmute(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
         if member.timed_out_until is None:

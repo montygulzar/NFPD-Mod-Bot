@@ -1,18 +1,88 @@
 import discord
 from discord.ext import commands
 
-from config import BLOCKED_USER_IDS, OWNER_IDS, PROTECTED_USER_IDS
+from config import (
+    APPROVED_GUILD_IDS,
+    BLOCKED_USER_IDS,
+    CR_ROLE_IDS,
+    DEVELOPMENT_ROLE_IDS,
+    MOD_ROLE_IDS,
+    OWNER_IDS,
+    OWNERSHIP_ROLE_IDS,
+    PROTECTED_USER_IDS,
+)
+
+# Tier hierarchy, lowest to highest. Each tier grants access to everything
+# at its level and below.
+_TIERS = ("mod", "cr", "ownership", "development")
+
+_TIER_ROLE_IDS: dict[str, set[int]] = {
+    "mod": MOD_ROLE_IDS,
+    "cr": CR_ROLE_IDS,
+    "ownership": OWNERSHIP_ROLE_IDS,
+    "development": DEVELOPMENT_ROLE_IDS,
+}
+
+_TIER_LABELS: dict[str, str] = {
+    "mod": "Moderator",
+    "cr": "CR",
+    "ownership": "Ownership",
+    "development": "Development",
+}
 
 
 class BlockedUser(commands.CheckFailure):
     """Raised when someone on BLOCKED_USER_IDS tries to run any command."""
 
 
+def has_tier(tier: str):
+    """Command check requiring the user to hold a role at *tier* or above.
+
+    OWNER_IDS always pass. The tier hierarchy from lowest to highest is:
+    mod → cr → ownership → development.
+    """
+    tier_index = _TIERS.index(tier)
+    label = _TIER_LABELS[tier]
+
+    async def predicate(ctx: commands.Context) -> bool:
+        if ctx.author.id in OWNER_IDS:
+            return True
+        if ctx.guild is None:
+            return False
+
+        author_role_ids = {role.id for role in ctx.author.roles}
+        for t in _TIERS[tier_index:]:
+            if author_role_ids & _TIER_ROLE_IDS[t]:
+                return True
+
+        raise commands.CheckFailure(
+            f"This command requires the **{label}** role or higher."
+        )
+
+    return commands.check(predicate)
+
+
+def from_approved_guild():
+    """Command check ensuring the command is run from an approved server.
+
+    Passes when APPROVED_GUILD_IDS is empty (no allowlist configured).
+    """
+
+    async def predicate(ctx: commands.Context) -> bool:
+        if not APPROVED_GUILD_IDS:
+            return True
+        if ctx.guild is not None and ctx.guild.id in APPROVED_GUILD_IDS:
+            return True
+        raise commands.CheckFailure("Global commands can only be used from an approved server.")
+
+    return commands.check(predicate)
+
+
 def is_bot_owner():
     """Command check restricting a command to OWNER_IDS.
 
-    Defined here rather than in each cog so the owner-only surface is enforced by
-    one predicate and cannot drift between cogs.
+    Kept for backward compatibility. New commands should use
+    has_tier("development") instead.
     """
 
     async def predicate(ctx: commands.Context) -> bool:

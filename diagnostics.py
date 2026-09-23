@@ -90,8 +90,11 @@ def validate_config() -> list[str]:
             "they cannot use the bot but also cannot be moderated."
         )
 
-    if not config.GLOBAL_ACTION_ROLE_IDS and not config.OWNER_IDS:
-        warnings.append("No global-moderator role or owner is configured - global commands are unreachable.")
+    if not config.CR_ROLE_IDS and not config.OWNER_IDS:
+        warnings.append("No CR role or owner is configured - global and case commands are unreachable.")
+
+    if not config.MOD_ROLE_IDS and not config.CR_ROLE_IDS and not config.OWNERSHIP_ROLE_IDS and not config.DEVELOPMENT_ROLE_IDS and not config.OWNER_IDS:
+        warnings.append("No tier roles or owners are configured - all commands are unreachable.")
 
     non_approved_exempt = config.GLOBAL_ACTION_EXEMPT_GUILD_IDS - config.APPROVED_GUILD_IDS
     if config.APPROVED_GUILD_IDS and non_approved_exempt:
