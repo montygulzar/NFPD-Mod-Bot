@@ -61,7 +61,13 @@ Records are also accessible to ombdeveloping as the operator, for the purposes o
 
 ## 7. Where your data is stored
 
-Data is held in a SQLite database on infrastructure operated by Railway, located in the United States. If this is outside the UK or EEA, transfers are made on the basis of their policy.
+Data is held in a self-hosted PostgreSQL database running on a private server operated directly by ombdeveloping. It is not held by a third-party application-hosting provider.
+
+<!-- ACTION REQUIRED: replace the bracketed text below with the country your server is
+     physically located in, then delete this comment. Leaving it unspecified is a
+     compliance gap, as data subjects are entitled to know the storage jurisdiction. -->
+
+The server is located in [COUNTRY]. Where this is outside the UK or EEA, transfers are made on the basis of appropriate safeguards.
 
 ## 8. How long we keep it
 

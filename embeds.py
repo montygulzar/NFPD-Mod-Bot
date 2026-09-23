@@ -53,6 +53,10 @@ def clamp(text: str | None, limit: int = EMBED_FIELD_LIMIT, *, empty: str = "*No
         return empty
     if len(text) <= limit:
         return text
+    if limit <= 3:
+        # No room for the ellipsis, and `text[:limit - 3]` would slice from the end
+        # and return more characters than the limit allows.
+        return text[:limit]
     return text[: limit - 3].rstrip() + "..."
 
 

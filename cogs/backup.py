@@ -1,9 +1,9 @@
 """Server backup and restore.
 
 /backupserver  - Snapshots all roles, channels, and permissions into a JSON file
-                 and attaches it to the channel. Requires Manage Guild.
+                 and attaches it to the channel. Requires Ownership tier.
 /restorebackup - Reads the most recent backup file and recreates any roles or
-                 channels that no longer exist. Requires Administrator.
+                 channels that no longer exist. Requires Ownership tier.
 
 Backups are intentionally JSON files (not a database table) so they can be kept
 offline and applied to a fresh server without needing database access.
@@ -20,7 +20,8 @@ from discord.ext import commands
 
 import embeds as embeds_module
 from config import BRAND_NAME
-from embeds import DANGER_COLOR, NEUTRAL_COLOR, SUCCESS_COLOR, base_embed, build_notice_embed
+from embeds import DANGER_COLOR, NEUTRAL_COLOR, SUCCESS_COLOR, base_embed, build_notice_embed, clamp
+from guards import has_tier
 from views import ConfirmView
 
 
@@ -136,20 +137,26 @@ async def _restore_channels(
     existing_ids = {c.id for c in guild.channels}
     created, failed = [], []
 
-    # Categories first so text/voice channels can be placed inside them
+    # Categories first so text/voice channels can be placed inside them. Track the objects
+    # we create as we go: guild.channels only lists them once the CHANNEL_CREATE gateway
+    # event arrives, which can land after the child channels below have already been made.
+    categories_by_name = {
+        channel.name: channel
+        for channel in guild.channels
+        if isinstance(channel, discord.CategoryChannel)
+    }
+
     for channel_data in snapshot_channels:
         if channel_data["id"] in existing_ids:
             continue
         if channel_data["type"] != "category":
             continue
         try:
-            await guild.create_category(name=channel_data["name"], reason=reason)
+            category = await guild.create_category(name=channel_data["name"], reason=reason)
+            categories_by_name[category.name] = category
             created.append(f"#{channel_data['name']} (category)")
         except discord.HTTPException as error:
             failed.append(f"{channel_data['name']}: {error}")
-
-    # Refresh so we can find newly created categories
-    guild_channels = {c.name: c for c in guild.channels if isinstance(c, discord.CategoryChannel)}
 
     for channel_data in snapshot_channels:
         if channel_data["id"] in existing_ids:
@@ -157,7 +164,7 @@ async def _restore_channels(
         if channel_data["type"] == "category":
             continue
 
-        category = guild_channels.get(channel_data.get("category_name") or "")
+        category = categories_by_name.get(channel_data.get("category_name") or "")
         try:
             if channel_data["type"] == "text":
                 await guild.create_text_channel(
@@ -191,7 +198,7 @@ class Backup(commands.Cog):
 
     @commands.hybrid_command(name="backupserver", description="Snapshot all server roles and channels to a JSON file")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("ownership")
     @commands.bot_has_permissions(manage_guild=True)
     async def backupserver(self, ctx: commands.Context) -> None:
         await ctx.defer()
@@ -229,7 +236,7 @@ class Backup(commands.Cog):
     )
     @app_commands.describe(backup_file="The .json backup file created by /backupserver")
     @commands.guild_only()
-    @commands.has_permissions(administrator=True)
+    @has_tier("ownership")
     @commands.bot_has_permissions(manage_roles=True, manage_channels=True)
     async def restorebackup(self, ctx: commands.Context, backup_file: discord.Attachment) -> None:
         if not backup_file.filename.endswith(".json"):
@@ -280,20 +287,23 @@ class Backup(commands.Cog):
             "\U0001F4BE  Server Restore Complete",
             SUCCESS_COLOR if not roles_failed and not channels_failed else NEUTRAL_COLOR,
         )
+        # These lists scale with the size of the server, so they have to be clamped:
+        # a single over-length field makes Discord reject the whole embed and the
+        # moderator would see nothing at all after a restore that did run.
         embed.add_field(
             name=f"Roles created ({len(roles_created)})",
-            value=", ".join(f"`{r}`" for r in roles_created) or "*None needed*",
+            value=clamp(", ".join(f"`{r}`" for r in roles_created), empty="*None needed*"),
             inline=False,
         )
         embed.add_field(
             name=f"Channels created ({len(channels_created)})",
-            value=", ".join(channels_created) or "*None needed*",
+            value=clamp(", ".join(channels_created), empty="*None needed*"),
             inline=False,
         )
         if roles_failed or channels_failed:
             embed.add_field(
                 name="Failures",
-                value="\n".join(roles_failed + channels_failed),
+                value=clamp("\n".join(roles_failed + channels_failed)),
                 inline=False,
             )
         embed.set_footer(text=BRAND_NAME, icon_url=embeds_module.BRAND_ICON_URL)

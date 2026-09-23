@@ -1,0 +1,54 @@
+# NFPD moderation bot.
+#
+# PostgreSQL is NOT defined here: it runs as the pre-existing `nfpd-postgres`
+# container. This file only builds and runs the bot and joins it to the same
+# network, so `docker compose up` can never touch the database container or its
+# volume.
+
+services:
+  bot:
+    build:
+      context: .
+      args:
+        # Stamped into the image so /debug and /health report the running build.
+        # Override at build time, e.g.
+        #   GIT_COMMIT=$(git rev-parse --short HEAD) docker compose build
+        APP_VERSION: ${APP_VERSION:-1.0.0}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: nfpd-mod-bot:latest
+    container_name: nfpd-mod-bot
+    restart: unless-stopped
+
+    # All secrets and configuration come from .env - nothing is baked into the image.
+    env_file:
+      - .env
+
+    networks:
+      - nodey-monitoring
+
+    # Must exceed DB_CLOSE_TIMEOUT plus the Discord close timeout so the shutdown
+    # path finishes before Docker escalates to SIGKILL.
+    stop_grace_period: 30s
+
+    # Without limits the daemon's json-file logs grow until the host disk fills.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    # Modest ceilings so a runaway bot cannot starve the rest of the host.
+    # Override in .env with DOCKER_MEMORY_LIMIT (e.g. 256M, 1G).
+    deploy:
+      resources:
+        limits:
+          memory: ${DOCKER_MEMORY_LIMIT:-512M}
+
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  # Created outside this file and shared with nfpd-postgres. `external: true`
+  # means compose attaches to it and never creates or removes it.
+  nodey-monitoring:
+    external: true

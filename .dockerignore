@@ -1,0 +1,25 @@
+# Keep secrets out of the build context entirely - anything copied into the image
+# is readable by anyone who can pull it.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.github
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+*.md
+!README.md
+
+.vscode/
+.idea/
+.DS_Store
+
+docker-compose.yml
+Dockerfile

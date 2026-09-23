@@ -5,9 +5,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import APPROVED_GUILD_IDS, GLOBAL_ACTION_ROLE_IDS, OWNER_IDS
+from config import APPROVED_GUILD_IDS, GLOBAL_ACTION_EXEMPT_GUILD_IDS
 from embeds import audit_reason, build_ban_dm_embed, build_dm_notice_embed, build_notice_embed, build_summary_embed
-from guards import is_protected
+from guards import from_approved_guild, has_tier, is_protected
 from modlog import record_case, try_dm
 from views import BanAppealView
 from views import ConfirmView, build_confirm_prompt
@@ -17,33 +17,21 @@ MAX_TIMEOUT_MINUTES = 40320  # Discord's own cap: 28 days
 GuildAction = Callable[[discord.Guild, Optional[discord.Member]], Awaitable[None]]
 
 
-def is_global_moderator():
-    async def predicate(ctx: commands.Context) -> bool:
-        # guild_only() also guards this, but check ordering in discord.py runs checks in the
-        # order decorators were applied - closest to the function first - so this predicate can
-        # run before guild_only()'s. Guard explicitly rather than depend on decorator order.
-        if ctx.guild is None:
-            return False
-
-        # Global commands may only be issued from a server you control. Without this, anyone who
-        # adds the bot could at minimum probe these commands from a server you have no oversight of.
-        if APPROVED_GUILD_IDS and ctx.guild.id not in APPROVED_GUILD_IDS:
-            raise commands.CheckFailure("Global commands can only be used from an approved server.")
-
-        if ctx.author.id in OWNER_IDS:
-            return True
-
-        author_role_ids = {role.id for role in getattr(ctx.author, "roles", [])}
-        return bool(author_role_ids & GLOBAL_ACTION_ROLE_IDS)
-
-    return commands.check(predicate)
-
-
 def target_guilds(bot: commands.Bot) -> list[discord.Guild]:
-    """Servers a global action is allowed to touch. Falls back to every server if no allowlist is set."""
-    if not APPROVED_GUILD_IDS:
-        return list(bot.guilds)
-    return [guild for guild in bot.guilds if guild.id in APPROVED_GUILD_IDS]
+    """Servers a global action is allowed to touch.
+
+    Falls back to every server if no allowlist is set. Guilds in
+    GLOBAL_ACTION_EXEMPT_GUILD_IDS are always excluded — they receive no global
+    actions so that (for example) a globally banned user can still access the
+    Appeals server.
+    """
+    if APPROVED_GUILD_IDS:
+        guilds = [g for g in bot.guilds if g.id in APPROVED_GUILD_IDS]
+    else:
+        guilds = list(bot.guilds)
+    if GLOBAL_ACTION_EXEMPT_GUILD_IDS:
+        guilds = [g for g in guilds if g.id not in GLOBAL_ACTION_EXEMPT_GUILD_IDS]
+    return guilds
 
 
 async def notify_user(user: discord.User, action_type: str, reason: str) -> None:
@@ -111,7 +99,8 @@ class GlobalModeration(commands.Cog):
     @commands.hybrid_command(name="globalkick", description="Kick a user from every server the bot shares with them")
     @app_commands.describe(user="The user to kick everywhere", reason="Why they're being kicked")
     @commands.guild_only()
-    @is_global_moderator()
+    @has_tier("management")
+    @from_approved_guild()
     async def globalkick(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
         if await refuse_protected(ctx, user):
             return
@@ -131,7 +120,8 @@ class GlobalModeration(commands.Cog):
     @commands.hybrid_command(name="globalban", description="Ban a user from every server the bot is in")
     @app_commands.describe(user="The user to ban everywhere", reason="Why they're being banned")
     @commands.guild_only()
-    @is_global_moderator()
+    @has_tier("management")
+    @from_approved_guild()
     async def globalban(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
         if await refuse_protected(ctx, user):
             return
@@ -151,7 +141,8 @@ class GlobalModeration(commands.Cog):
     @commands.hybrid_command(name="globalunban", description="Unban a user from every server the bot is in")
     @app_commands.describe(user="The user to unban everywhere", reason="Why they're being unbanned")
     @commands.guild_only()
-    @is_global_moderator()
+    @has_tier("management")
+    @from_approved_guild()
     async def globalunban(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
         await ctx.defer()
         reason_text = audit_reason(ctx.author, "Global unban", reason)
@@ -169,7 +160,8 @@ class GlobalModeration(commands.Cog):
         reason="Why they're being muted",
     )
     @commands.guild_only()
-    @is_global_moderator()
+    @has_tier("management")
+    @from_approved_guild()
     async def globalmute(
         self,
         ctx: commands.Context,
@@ -199,7 +191,8 @@ class GlobalModeration(commands.Cog):
     @commands.hybrid_command(name="globalunmute", description="Clear a user's timeout in every shared server")
     @app_commands.describe(user="The user to unmute everywhere", reason="Why they're being unmuted")
     @commands.guild_only()
-    @is_global_moderator()
+    @has_tier("management")
+    @from_approved_guild()
     async def globalunmute(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
         await ctx.defer()
         reason_text = audit_reason(ctx.author, "Global unmute", reason)

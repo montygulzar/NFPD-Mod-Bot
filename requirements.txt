@@ -1,3 +1,14 @@
-discord.py>=2.4.0
-asyncpg>=0.29.0
-python-dotenv>=1.0.0
+# Upper bounds are pinned to the current major so an unattended image rebuild
+# cannot pull in a breaking release. Review and raise these deliberately.
+
+discord.py>=2.4.0,<3.0.0
+asyncpg>=0.29.0,<1.0.0
+python-dotenv>=1.0.0,<2.0.0
+
+# Used directly by health.py. It arrives as a discord.py dependency too, but a
+# module that imports it must declare it rather than rely on that staying true.
+aiohttp>=3.9.0,<4.0.0
+
+# Process memory/CPU/thread figures in /debug. The cog degrades gracefully if it
+# is missing, but it is genuinely wanted on an always-on host.
+psutil>=5.9.0,<8.0.0

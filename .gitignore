@@ -1,6 +1,16 @@
+# Secrets - never commit the populated environment file.
 .env
+.env.local
+
+# Leftover from the pre-PostgreSQL SQLite build; kept so a stale local copy is
+# never committed.
 moderation.db
+
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
 venv/
+
+.vscode/
+.idea/
+.DS_Store

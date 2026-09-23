@@ -1,7 +1,16 @@
+"""Owner-only diagnostics.
+
+Answers the questions you actually have when something looks wrong on the host:
+is the gateway up, is Postgres reachable and how big is the pool, is the temp-ban
+loop still running, what has been failing recently, and exactly which build is
+running in this container.
+"""
 import math
 import os
 import platform
+import time
 from datetime import timedelta
+from pathlib import Path
 
 import discord
 from discord.ext import commands
@@ -10,6 +19,7 @@ import config
 import database
 import diagnostics
 from embeds import NEUTRAL_COLOR, base_embed, clamp
+from guards import has_tier
 from modlog import check_log_channel
 
 try:
@@ -21,24 +31,41 @@ except Exception:
     psutil = None
     _process = None
 
-
-def is_bot_owner():
-    async def predicate(ctx: commands.Context) -> bool:
-        return ctx.author.id in config.OWNER_IDS
-
-    return commands.check(predicate)
+TICK = "✅"
+CROSS = "❌"
+WARN = "⚠"
 
 
 def format_duration(seconds: float) -> str:
     return str(timedelta(seconds=int(seconds)))
 
 
+def in_container() -> bool:
+    """Whether this process is running inside a container.
+
+    /.dockerenv is created by the Docker daemon; the cgroup check covers the
+    podman/containerd cases where it is absent.
+    """
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        return "docker" in Path("/proc/1/cgroup").read_text() or "containerd" in Path("/proc/1/cgroup").read_text()
+    except OSError:
+        return False
+
+
+def format_age(timestamp: float | None) -> str:
+    if timestamp is None:
+        return "never"
+    return f"{time.time() - timestamp:.0f}s ago"
+
+
 class Debug(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="debug", description="Full diagnostic report. Owner-only.")
-    @is_bot_owner()
+    @commands.hybrid_command(name="debug", description="Full diagnostic report. Development tier.")
+    @has_tier("development")
     async def debug(self, ctx: commands.Context):
         await ctx.defer(ephemeral=True)
         embeds = [
@@ -49,20 +76,50 @@ class Debug(commands.Cog):
         ]
         await ctx.send(embeds=embeds, ephemeral=True)
 
+    @commands.hybrid_command(name="health", description="Quick liveness summary: database, gateway, uptime.")
+    @has_tier("development")
+    async def health(self, ctx: commands.Context):
+        """The short version of /debug, for a fast check that everything is up."""
+        await ctx.defer(ephemeral=True)
+
+        database_ok, database_detail = await database.check_connection()
+        gateway_ok = self.bot.is_ready() and not self.bot.is_closed()
+        latency = "n/a" if math.isnan(self.bot.latency) else f"{self.bot.latency * 1000:.0f}ms"
+
+        overall_ok = database_ok and gateway_ok
+        embed = base_embed(
+            f"{TICK if overall_ok else WARN}  Health",
+            0x3BA55D if overall_ok else 0xF5A524,
+        )
+        embed.add_field(name="Gateway", value=f"{TICK if gateway_ok else CROSS} {latency}", inline=True)
+        embed.add_field(name="Database", value=f"{TICK if database_ok else CROSS} {clamp(database_detail, 100)}", inline=True)
+        embed.add_field(name="Uptime", value=format_duration(diagnostics.uptime_seconds()), inline=True)
+        embed.add_field(name="Guilds", value=str(len(self.bot.guilds)), inline=True)
+        embed.add_field(
+            name="Build",
+            value=f"`{config.APP_VERSION}` / `{config.GIT_COMMIT[:7]}`",
+            inline=True,
+        )
+        stats = database.pool_stats()
+        if "size" in stats:
+            embed.add_field(
+                name="DB pool",
+                value=f"{stats['idle']}/{stats['size']} idle (max {stats['max_size']})",
+                inline=True,
+            )
+        await ctx.send(embed=embed, ephemeral=True)
+
     def _overview_embed(self) -> discord.Embed:
         embed = base_embed("Debug - Overview", NEUTRAL_COLOR)
 
         version_lines = [
+            f"Version `{config.APP_VERSION}`",
+            f"Commit `{config.GIT_COMMIT[:12]}`",
             f"discord.py `{discord.__version__}`",
             f"Python `{platform.python_version()}`",
-            f"Platform `{platform.system()} {platform.release()}`",
+            f"Platform `{platform.system()} {platform.machine()}`",
+            f"Container `{'yes' if in_container() else 'no'}`",
         ]
-        commit = os.environ.get("RAILWAY_GIT_COMMIT_SHA")
-        if commit:
-            version_lines.append(f"Commit `{commit[:7]}`")
-        deployment = os.environ.get("RAILWAY_DEPLOYMENT_ID")
-        if deployment:
-            version_lines.append(f"Deployment `{deployment[:8]}`")
         embed.add_field(name="Build", value="\n".join(version_lines), inline=True)
 
         embed.add_field(
@@ -94,7 +151,12 @@ class Debug(commands.Cog):
             cpu_percent = _process.cpu_percent(interval=None)  # non-blocking: uses the seeded baseline
             embed.add_field(
                 name="Resource usage",
-                value=f"Memory: **{memory_mb:.1f} MB**\nCPU: **{cpu_percent:.1f}%**\nPID: `{os.getpid()}`",
+                value=(
+                    f"Memory: **{memory_mb:.1f} MB**\n"
+                    f"CPU: **{cpu_percent:.1f}%**\n"
+                    f"Threads: **{_process.num_threads()}**\n"
+                    f"PID: `{os.getpid()}`"
+                ),
                 inline=True,
             )
         else:
@@ -108,12 +170,26 @@ class Debug(commands.Cog):
         gateway_ok = self.bot.is_ready() and not self.bot.is_closed()
         embed.add_field(
             name="Discord gateway",
-            value=f"{'\u2705' if gateway_ok else '\u274C'} {'Connected' if gateway_ok else 'Not connected'}",
+            value=f"{TICK if gateway_ok else CROSS} {'Connected' if gateway_ok else 'Not connected'}",
             inline=True,
         )
 
         db_ok, db_detail = await database.check_connection()
-        embed.add_field(name="Database", value=f"{'\u2705' if db_ok else '\u274C'} {db_detail}", inline=True)
+        embed.add_field(name="Database", value=f"{TICK if db_ok else CROSS} {clamp(db_detail, 200)}", inline=True)
+
+        stats = database.pool_stats()
+        if "size" in stats:
+            pool_value = (
+                f"In use: **{stats['size'] - stats['idle']}**\n"
+                f"Idle: **{stats['idle']}**\n"
+                f"Open: **{stats['size']}** (min {stats['min_size']}, max {stats['max_size']})"
+            )
+        else:
+            pool_value = "Pool not open"
+        pool_value += f"\nLast success: {format_age(stats.get('last_success_at'))}"
+        if stats.get("last_failure"):
+            pool_value += f"\nLast error: {clamp(stats['last_failure'], 120)}"
+        embed.add_field(name="Connection pool", value=pool_value, inline=True)
 
         temp_ban_count = await database.get_active_temp_ban_count() if db_ok else 0
         total_cases = await database.get_total_case_count() if db_ok else 0
@@ -130,15 +206,21 @@ class Debug(commands.Cog):
             status = "Running" if loop_ok else ("Failed" if loop.failed() else "Not running")
             embed.add_field(
                 name="Temp-ban expiry loop",
-                value=f"{'\u2705' if loop_ok else '\u274C'} {status}\nIterations: **{loop.current_loop}**",
+                value=f"{TICK if loop_ok else CROSS} {status}\nIterations: **{loop.current_loop}**",
                 inline=True,
             )
+
+        if config.HEALTH_SERVER_ENABLED:
+            health_value = f"Listening on `{config.HEALTH_HOST}:{config.HEALTH_PORT}`\n`/health` and `/ready`"
+        else:
+            health_value = "Disabled"
+        embed.add_field(name="Health endpoint", value=health_value, inline=True)
 
         if guild is not None:
             log_ok, log_detail = await check_log_channel(guild)
             embed.add_field(
                 name="Mod-log (this server)",
-                value=f"{'\u2705' if log_ok else '\u26A0'} {clamp(log_detail, 200)}",
+                value=f"{TICK if log_ok else WARN} {clamp(log_detail, 200)}",
                 inline=False,
             )
 
@@ -147,34 +229,51 @@ class Debug(commands.Cog):
     def _config_embed(self) -> discord.Embed:
         embed = base_embed("Debug - Config", NEUTRAL_COLOR)
 
-        # Presence and counts only - never the actual token or raw ID values here.
+        # Presence and counts only - never the actual token, credentials or raw ID values.
         embed.add_field(
             name="Environment",
             value=(
                 f"BOT_TOKEN: {'set' if config.BOT_TOKEN else 'MISSING'} (redacted)\n"
                 f"COMMAND_PREFIX: `{config.COMMAND_PREFIX}`\n"
                 f"BRAND_NAME: `{config.BRAND_NAME}`\n"
-                f"DATABASE_URL: `{config.DATABASE_URL[:30]}...` (PostgreSQL)"
+                f"LOG_LEVEL: `{config.LOG_LEVEL}` ({config.LOG_FORMAT})\n"
+                f"Database: `{config.redacted_database_url()}`"
             ),
             inline=False,
+        )
+        embed.add_field(
+            name="Database tuning",
+            value=(
+                f"Pool size: **{config.DB_POOL_MIN_SIZE}-{config.DB_POOL_MAX_SIZE}**\n"
+                f"Command timeout: **{config.DB_COMMAND_TIMEOUT:.0f}s**\n"
+                f"Acquire timeout: **{config.DB_ACQUIRE_TIMEOUT:.0f}s**\n"
+                f"Query retries: **{config.DB_QUERY_MAX_RETRIES}**"
+            ),
+            inline=True,
         )
         embed.add_field(
             name="Access control",
             value=(
                 f"Owners configured: **{len(config.OWNER_IDS)}**\n"
-                f"Global-mod roles configured: **{len(config.GLOBAL_ACTION_ROLE_IDS)}**\n"
+                f"Mod roles: **{len(config.MOD_ROLE_IDS)}**\n"
+                f"Ban Perm roles: **{len(config.BAN_PERM_ROLE_IDS)}**\n"
+                f"CR roles: **{len(config.CR_ROLE_IDS)}**\n"
+                f"Management roles: **{len(config.MANAGEMENT_ROLE_IDS)}**\n"
+                f"Ownership roles: **{len(config.OWNERSHIP_ROLE_IDS)}**\n"
+                f"Development users: **{len(config.DEVELOPMENT_USER_IDS)}**\n"
                 f"Approved servers: **{len(config.APPROVED_GUILD_IDS) or 'all (no allowlist)'}**\n"
+                f"Global-exempt servers: **{len(config.GLOBAL_ACTION_EXEMPT_GUILD_IDS) or 'none'}**\n"
                 f"Auto-leave unapproved: **{config.LEAVE_UNAPPROVED_GUILDS}**\n"
                 f"Protected users: **{len(config.PROTECTED_USER_IDS)}**\n"
                 f"Blocked users: **{len(config.BLOCKED_USER_IDS)}**"
             ),
-            inline=False,
+            inline=True,
         )
 
         warnings = diagnostics.validate_config()
         embed.add_field(
             name=f"Validation ({'clean' if not warnings else f'{len(warnings)} issue(s)'})",
-            value=clamp("\n".join(f"\u26A0 {warning}" for warning in warnings), empty="\u2705 No issues found."),
+            value=clamp("\n".join(f"{WARN} {warning}" for warning in warnings), empty=f"{TICK} No issues found."),
             inline=False,
         )
         return embed

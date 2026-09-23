@@ -57,13 +57,18 @@ async def post_in_server(guild: discord.Guild, message: str) -> None:
 
 
 async def get_inviter(guild: discord.Guild, bot_user_id: int) -> discord.User | None:
-    """Look up who added the bot via the audit log."""
+    """Look up who added the bot via the audit log.
+
+    Catches HTTPException rather than just Forbidden: this runs on the join path, and
+    letting any other API error escape would skip the in-server notice, the owner alert
+    and the auto-leave that follow it.
+    """
     try:
         async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.bot_add):
             if entry.target and entry.target.id == bot_user_id:
                 return entry.user
-    except discord.Forbidden:
-        pass
+    except discord.HTTPException as error:
+        logger.warning("Could not read the audit log in %s (%s): %s", guild.name, guild.id, error)
     return None
 
 
@@ -108,6 +113,9 @@ class GuildGuard(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        # Unapproved guilds already reported. on_ready fires on every gateway
+        # reconnect, and without this each one repeats the same warnings.
+        self._reported: set[int] = set()
 
     def is_approved(self, guild: discord.Guild) -> bool:
         return not APPROVED_GUILD_IDS or guild.id in APPROVED_GUILD_IDS
@@ -134,8 +142,11 @@ class GuildGuard(commands.Cog):
     async def on_ready(self):
         for guild in self.bot.guilds:
             if self.is_approved(guild):
+                self._reported.discard(guild.id)
                 continue
-            logger.warning("In unapproved server: %s (%s), owner %s", guild.name, guild.id, guild.owner_id)
+            if guild.id not in self._reported:
+                self._reported.add(guild.id)
+                logger.warning("In unapproved server: %s (%s), owner %s", guild.name, guild.id, guild.owner_id)
             if LEAVE_UNAPPROVED_GUILDS:
                 await self._leave(guild)
 

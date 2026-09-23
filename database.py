@@ -1,22 +1,74 @@
-"""PostgreSQL database layer using asyncpg.
+"""PostgreSQL data layer (asyncpg).
 
-Replaces the previous aiosqlite/SQLite implementation. Data is now stored in
-Railway's managed PostgreSQL service which persists across deploys with no
-volume mounting required.
+Connection model
+    A single pool is opened at startup and shared by every coroutine. The pool is
+    the only thing that talks to Postgres; nothing else opens connections.
 
-Connection: a single pool opened at startup, shared across all coroutines.
-Queries:    use $1, $2 ... placeholders (asyncpg convention).
-IDs:        BIGINT for Discord snowflakes (they exceed the 32-bit INT range).
+Availability
+    The bot and Postgres are separate containers that start, stop and restart
+    independently, so neither "Postgres is not up yet" nor "Postgres went away for
+    ten seconds" is treated as fatal. Startup retries with exponential backoff, and
+    individual queries retry a bounded number of times. Errors that no amount of
+    retrying will fix - bad password, missing database, missing privileges - fail
+    immediately with a message that says what to correct.
+
+Conventions
+    Queries use $1, $2 ... placeholders (asyncpg style).
+    Discord snowflakes are BIGINT; they overflow a 32-bit INT.
 """
+import asyncio
 import json
+import logging
+import random
 import time as _time
 from datetime import datetime, timezone
 
 import asyncpg
 
-from config import DATABASE_URL
+import config
+
+logger = logging.getLogger("modbot.database")
 
 _pool: asyncpg.Pool | None = None
+
+# Set when the pool is deliberately closed, so in-flight queries racing with
+# shutdown fail fast instead of retrying against a pool that is going away.
+_closing = False
+
+# Tracks the outcome of the most recent database interaction, for the health
+# endpoint and the /debug report.
+_last_success_at: float | None = None
+_last_failure: str | None = None
+
+# Advisory-lock key for schema setup. Arbitrary but must stay stable: it stops two
+# containers started at the same moment from running CREATE TABLE concurrently.
+_SCHEMA_LOCK_KEY = 0x4E46_5044  # "NFPD"
+
+# Transient faults: the connection died or the server is not accepting work yet.
+# Retrying these is worthwhile.
+_RETRYABLE_ERRORS = (
+    asyncpg.exceptions.PostgresConnectionError,
+    asyncpg.exceptions.CannotConnectNowError,
+    asyncpg.exceptions.TooManyConnectionsError,
+    asyncpg.exceptions.AdminShutdownError,
+    asyncpg.exceptions.CrashShutdownError,
+    asyncpg.InterfaceError,
+    OSError,  # includes ConnectionRefusedError / ConnectionResetError
+    asyncio.TimeoutError,
+)
+
+# Misconfiguration: retrying forever would hide the real problem behind an endless
+# "still waiting for the database" loop, so these abort startup immediately.
+_FATAL_CONFIG_ERRORS = (
+    asyncpg.exceptions.InvalidPasswordError,
+    asyncpg.exceptions.InvalidCatalogNameError,          # database does not exist
+    asyncpg.exceptions.InvalidAuthorizationSpecificationError,
+    asyncpg.exceptions.InsufficientPrivilegeError,
+)
+
+
+class DatabaseUnavailable(RuntimeError):
+    """Raised when a query cannot reach Postgres after exhausting its retries."""
 
 
 SCHEMA_STATEMENTS = (
@@ -33,6 +85,10 @@ SCHEMA_STATEMENTS = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_cases_guild_user   ON cases (guild_id, user_id)",
     "CREATE INDEX IF NOT EXISTS idx_cases_guild_action ON cases (guild_id, action_type)",
+    # Backs the per-guild case listing and the CSV export, both of which order by id.
+    "CREATE INDEX IF NOT EXISTS idx_cases_guild_id     ON cases (guild_id, id)",
+    # Backs the "most active moderators" leaderboard.
+    "CREATE INDEX IF NOT EXISTS idx_cases_guild_mod    ON cases (guild_id, moderator_id)",
     """
     CREATE TABLE IF NOT EXISTS guild_settings (
         guild_id                  BIGINT PRIMARY KEY,
@@ -72,66 +128,283 @@ SCHEMA_STATEMENTS = (
     """,
 )
 
+# Columns added after the first release. Applied with ADD COLUMN IF NOT EXISTS so an
+# existing database gains them in place - CREATE TABLE IF NOT EXISTS alone would skip
+# an already-created table and silently leave the new column missing.
+MIGRATION_STATEMENTS = (
+    "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS server_log_channel_id BIGINT",
+    "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_mute_threshold   INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_mute_minutes     INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_kick_threshold   INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_ban_threshold    INTEGER",
+)
+
+
+# --- Connection lifecycle -----------------------------------------------------
+
+async def _new_pool() -> asyncpg.Pool:
+    return await asyncpg.create_pool(
+        dsn=config.DATABASE_URL,
+        min_size=config.DB_POOL_MIN_SIZE,
+        max_size=config.DB_POOL_MAX_SIZE,
+        command_timeout=config.DB_COMMAND_TIMEOUT,
+        max_inactive_connection_lifetime=config.DB_MAX_INACTIVE_CONNECTION_LIFETIME,
+        # Shows up in pg_stat_activity, so it is obvious which client owns a
+        # connection when inspecting the shared Postgres instance.
+        server_settings={"application_name": "nfpd-mod-bot"},
+    )
+
+
+async def _prepare_schema(pool: asyncpg.Pool) -> None:
+    """Create missing tables, indexes and columns. Never drops or rewrites data."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Serialises schema setup across containers starting simultaneously.
+            # Released automatically when the transaction ends.
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", _SCHEMA_LOCK_KEY)
+            for statement in SCHEMA_STATEMENTS:
+                await conn.execute(statement)
+            for statement in MIGRATION_STATEMENTS:
+                await conn.execute(statement)
+
 
 async def connect_database() -> None:
-    """Open the connection pool and ensure the schema exists. Call once at startup."""
-    global _pool
-    _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
-    async with _pool.acquire() as conn:
-        for statement in SCHEMA_STATEMENTS:
-            await conn.execute(statement)
+    """Open the pool and ensure the schema exists, waiting for Postgres if needed.
+
+    Retries with exponential backoff. With the default DB_CONNECT_MAX_ATTEMPTS of 0
+    it waits indefinitely, which is deliberate: a bot that exits because Postgres is
+    thirty seconds behind it in the boot order just crash-loops, whereas one that
+    waits comes up on its own the moment the database is ready.
+    """
+    global _pool, _closing
+
+    if _pool is not None:
+        return
+
+    _closing = False
+    delay = config.DB_CONNECT_BACKOFF_START
+    attempt = 0
+    started = _time.monotonic()
+
+    while True:
+        attempt += 1
+        pool = None
+        try:
+            pool = await _new_pool()
+            await _prepare_schema(pool)
+        except _FATAL_CONFIG_ERRORS as error:
+            await _discard(pool)
+            logger.critical(
+                "Database rejected the connection: %s. This is a configuration problem "
+                "and will not resolve by retrying - check the credentials and database "
+                "name in DATABASE_URL (%s).",
+                error, config.redacted_database_url(),
+            )
+            raise
+        except Exception as error:
+            await _discard(pool)
+            _record_failure(error)
+
+            if config.DB_CONNECT_MAX_ATTEMPTS and attempt >= config.DB_CONNECT_MAX_ATTEMPTS:
+                logger.critical(
+                    "Could not reach the database at %s after %d attempt(s): %s",
+                    config.redacted_database_url(), attempt, error,
+                )
+                raise
+
+            # Jitter (±25%) stops the bot and any sibling service from retrying in lockstep.
+            base = min(delay, config.DB_CONNECT_BACKOFF_MAX)
+            wait = base * (0.75 + random.random() * 0.5)
+            logger.warning(
+                "Database not reachable at %s (attempt %d, retrying in %.1fs): %s",
+                config.redacted_database_url(), attempt, wait, error,
+            )
+            await asyncio.sleep(wait)
+            delay = min(delay * 2, config.DB_CONNECT_BACKOFF_MAX)
+            continue
+
+        _pool = pool
+        _record_success()
+        logger.info(
+            "Database ready at %s (pool %d-%d, %d attempt(s), %.1fs)",
+            config.redacted_database_url(),
+            config.DB_POOL_MIN_SIZE, config.DB_POOL_MAX_SIZE,
+            attempt, _time.monotonic() - started,
+        )
+        return
+
+
+async def _discard(pool: asyncpg.Pool | None) -> None:
+    """Drop a pool that failed during setup, so the retry doesn't leak connections."""
+    if pool is None:
+        return
+    try:
+        await asyncio.wait_for(pool.close(), timeout=5.0)
+    except Exception:
+        # Cleanup must never mask the connection error that brought us here.
+        pool.terminate()
 
 
 async def close_database() -> None:
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
+    """Close the pool, giving in-flight queries a bounded moment to finish.
+
+    Bounded because Docker SIGKILLs the container when the stop grace period runs
+    out; a pool.close() blocked on a stuck query would otherwise consume all of it
+    and the process would be killed mid-cleanup anyway.
+    """
+    global _pool, _closing
+
+    pool, _pool = _pool, None
+    if pool is None:
+        return
+
+    _closing = True
+    try:
+        await asyncio.wait_for(pool.close(), timeout=config.DB_CLOSE_TIMEOUT)
+        logger.info("Database pool closed cleanly")
+    except asyncio.TimeoutError:
+        pool.terminate()
+        logger.warning(
+            "Database pool did not close within %.0fs - connections terminated",
+            config.DB_CLOSE_TIMEOUT,
+        )
+    except Exception as error:
+        pool.terminate()
+        logger.warning("Error while closing the database pool, terminated instead: %s", error)
+
+
+def is_connected() -> bool:
+    return _pool is not None and not _pool.is_closing()
 
 
 def _get_pool() -> asyncpg.Pool:
     if _pool is None:
-        raise RuntimeError("Database is not connected. Call connect_database() during startup.")
+        raise DatabaseUnavailable(
+            "Database is not connected. connect_database() must run during startup."
+        )
     return _pool
 
 
+def _record_success() -> None:
+    global _last_success_at, _last_failure
+    _last_success_at = _time.time()
+    _last_failure = None
+
+
+def _record_failure(error: BaseException) -> None:
+    global _last_failure
+    _last_failure = type(error).__name__
+
+
+def pool_stats() -> dict:
+    """Snapshot of pool state for the health endpoint and /debug."""
+    stats = {
+        "connected": is_connected(),
+        "last_success_at": _last_success_at,
+        "last_failure": _last_failure,
+    }
+    if _pool is not None:
+        stats.update(
+            size=_pool.get_size(),
+            idle=_pool.get_idle_size(),
+            min_size=_pool.get_min_size(),
+            max_size=_pool.get_max_size(),
+        )
+    return stats
+
+
+# --- Query execution ----------------------------------------------------------
+
+async def _run(operation, *, idempotent: bool):
+    """Acquire a connection and run `operation`, retrying transient failures.
+
+    `idempotent` says whether re-running the statement is safe. A connection that
+    drops mid-query is ambiguous: PostgreSQL may or may not have committed the
+    statement before the client lost contact. Non-idempotent writes (an INSERT that
+    allocates a case number, a DELETE ... RETURNING that consumes saved state) are
+    therefore only retried when the failure happened while acquiring the connection —
+    that is, before any statement could have run. If the failure is ambiguous (after
+    acquire, during execution), the operation is NOT retried and DatabaseUnavailable
+    is raised so the caller can surface a safe error to the user.
+
+    Callers that are naturally safe to repeat — UPSERTs, DELETEs by primary key,
+    idempotent SELECTs — should pass idempotent=True so they benefit from retry.
+    """
+    attempt = 0
+    while True:
+        if _closing:
+            raise DatabaseUnavailable("Database pool is shutting down")
+
+        pool = _get_pool()
+        started_executing = False
+        try:
+            async with pool.acquire(timeout=config.DB_ACQUIRE_TIMEOUT) as conn:
+                started_executing = True
+                result = await operation(conn)
+            _record_success()
+            return result
+        except _RETRYABLE_ERRORS as error:
+            _record_failure(error)
+            retryable = idempotent or not started_executing
+            if not retryable or attempt >= config.DB_QUERY_MAX_RETRIES or _closing:
+                logger.warning(
+                    "Database query failed (attempt %d, retryable=%s): %s",
+                    attempt + 1, retryable, error,
+                )
+                raise DatabaseUnavailable(str(error)) from error
+
+            attempt += 1
+            wait = min(0.5 * (2 ** (attempt - 1)), 5.0)
+            logger.warning(
+                "Database query failed (attempt %d/%d, retrying in %.1fs): %s",
+                attempt, config.DB_QUERY_MAX_RETRIES + 1, wait, error,
+            )
+            await asyncio.sleep(wait)
+        except asyncpg.PostgresError as error:
+            # A real SQL error (bad query, constraint violation). Not retryable, and
+            # not a connectivity problem, so it must not mark the database unhealthy.
+            _record_success()
+            logger.exception("Database rejected a statement: %s", error)
+            raise
+
+
 async def _fetch_all(query: str, *args) -> list[asyncpg.Record]:
-    async with _get_pool().acquire() as conn:
-        return await conn.fetch(query, *args)
+    return await _run(lambda conn: conn.fetch(query, *args), idempotent=True)
 
 
 async def _fetch_one(query: str, *args) -> asyncpg.Record | None:
-    async with _get_pool().acquire() as conn:
-        return await conn.fetchrow(query, *args)
+    return await _run(lambda conn: conn.fetchrow(query, *args), idempotent=True)
 
 
 async def _fetch_val(query: str, *args):
-    async with _get_pool().acquire() as conn:
-        return await conn.fetchval(query, *args)
+    return await _run(lambda conn: conn.fetchval(query, *args), idempotent=True)
 
 
-async def _execute(query: str, *args) -> int:
+async def _execute(query: str, *args, idempotent: bool = False) -> int:
     """Execute a statement and return the number of affected rows."""
-    async with _get_pool().acquire() as conn:
-        status = await conn.execute(query, *args)
+    status = await _run(lambda conn: conn.execute(query, *args), idempotent=idempotent)
     # asyncpg returns a status string like "UPDATE 3" or "DELETE 1"
     try:
         return int(status.split()[-1])
-    except (IndexError, ValueError):
+    except (AttributeError, IndexError, ValueError):
         return 0
 
 
 # --- Cases -------------------------------------------------------------------
 
 async def add_case(guild_id: int, user_id: int, moderator_id: int, action_type: str, reason: str) -> int:
-    return await _fetch_val(
-        """
-        INSERT INTO cases (guild_id, user_id, moderator_id, action_type, reason, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id
-        """,
-        guild_id, user_id, moderator_id, action_type, reason,
-        datetime.now(timezone.utc).isoformat(),
+    # Not idempotent: a retry would allocate a second case number for one action.
+    return await _run(
+        lambda conn: conn.fetchval(
+            """
+            INSERT INTO cases (guild_id, user_id, moderator_id, action_type, reason, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
+            """,
+            guild_id, user_id, moderator_id, action_type, reason,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+        idempotent=False,
     )
 
 
@@ -170,6 +443,7 @@ async def update_case_reason(guild_id: int, case_id: int, new_reason: str) -> bo
     changed = await _execute(
         "UPDATE cases SET reason = $1 WHERE guild_id = $2 AND id = $3",
         new_reason, guild_id, case_id,
+        idempotent=True,
     )
     return changed > 0
 
@@ -178,6 +452,7 @@ async def delete_case(guild_id: int, case_id: int) -> bool:
     changed = await _execute(
         "DELETE FROM cases WHERE guild_id = $1 AND id = $2",
         guild_id, case_id,
+        idempotent=True,
     )
     return changed > 0
 
@@ -244,6 +519,11 @@ DEFAULT_SETTINGS: dict = {
     "warn_ban_threshold": None,
 }
 
+# Columns _upsert_settings is allowed to write. The column name is interpolated into
+# the SQL (it cannot be a bind parameter), so it is checked against this set rather
+# than trusted from the caller.
+_SETTINGS_COLUMNS = frozenset(DEFAULT_SETTINGS)
+
 
 async def get_guild_settings(guild_id: int) -> dict:
     row = await _fetch_one("SELECT * FROM guild_settings WHERE guild_id = $1", guild_id)
@@ -253,15 +533,17 @@ async def get_guild_settings(guild_id: int) -> dict:
 
 
 async def _upsert_settings(guild_id: int, column: str, value) -> None:
-    async with _get_pool().acquire() as conn:
-        await conn.execute(
-            f"""
-            INSERT INTO guild_settings (guild_id, {column})
-            VALUES ($1, $2)
-            ON CONFLICT (guild_id) DO UPDATE SET {column} = EXCLUDED.{column}
-            """,
-            guild_id, value,
-        )
+    if column not in _SETTINGS_COLUMNS:
+        raise ValueError(f"Refusing to write unknown settings column {column!r}")
+    await _execute(
+        f"""
+        INSERT INTO guild_settings (guild_id, {column})
+        VALUES ($1, $2)
+        ON CONFLICT (guild_id) DO UPDATE SET {column} = EXCLUDED.{column}
+        """,
+        guild_id, value,
+        idempotent=True,
+    )
 
 
 async def set_log_channel(guild_id: int, channel_id: int) -> None:
@@ -287,20 +569,20 @@ async def set_warn_thresholds(
     kick_threshold: int | None,
     ban_threshold: int | None,
 ) -> None:
-    async with _get_pool().acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO guild_settings
-                (guild_id, warn_mute_threshold, warn_mute_minutes, warn_kick_threshold, warn_ban_threshold)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (guild_id) DO UPDATE SET
-                warn_mute_threshold = EXCLUDED.warn_mute_threshold,
-                warn_mute_minutes   = EXCLUDED.warn_mute_minutes,
-                warn_kick_threshold = EXCLUDED.warn_kick_threshold,
-                warn_ban_threshold  = EXCLUDED.warn_ban_threshold
-            """,
-            guild_id, mute_threshold, mute_minutes, kick_threshold, ban_threshold,
-        )
+    await _execute(
+        """
+        INSERT INTO guild_settings
+            (guild_id, warn_mute_threshold, warn_mute_minutes, warn_kick_threshold, warn_ban_threshold)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (guild_id) DO UPDATE SET
+            warn_mute_threshold = EXCLUDED.warn_mute_threshold,
+            warn_mute_minutes   = EXCLUDED.warn_mute_minutes,
+            warn_kick_threshold = EXCLUDED.warn_kick_threshold,
+            warn_ban_threshold  = EXCLUDED.warn_ban_threshold
+        """,
+        guild_id, mute_threshold, mute_minutes, kick_threshold, ban_threshold,
+        idempotent=True,
+    )
 
 
 # --- Lockdown roles ----------------------------------------------------------
@@ -317,6 +599,7 @@ async def add_lockdown_role(guild_id: int, role_id: int) -> None:
     await _execute(
         "INSERT INTO lockdown_roles (guild_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         guild_id, role_id,
+        idempotent=True,
     )
 
 
@@ -324,12 +607,13 @@ async def remove_lockdown_role(guild_id: int, role_id: int) -> bool:
     changed = await _execute(
         "DELETE FROM lockdown_roles WHERE guild_id = $1 AND role_id = $2",
         guild_id, role_id,
+        idempotent=True,
     )
     return changed > 0
 
 
 async def clear_lockdown_roles(guild_id: int) -> None:
-    await _execute("DELETE FROM lockdown_roles WHERE guild_id = $1", guild_id)
+    await _execute("DELETE FROM lockdown_roles WHERE guild_id = $1", guild_id, idempotent=True)
 
 
 # --- Temporary bans ----------------------------------------------------------
@@ -342,6 +626,7 @@ async def add_temp_ban(guild_id: int, user_id: int, unban_at: datetime) -> None:
         ON CONFLICT (guild_id, user_id) DO UPDATE SET unban_at = EXCLUDED.unban_at
         """,
         guild_id, user_id, unban_at.isoformat(),
+        idempotent=True,
     )
 
 
@@ -349,6 +634,7 @@ async def remove_temp_ban(guild_id: int, user_id: int) -> None:
     await _execute(
         "DELETE FROM temp_bans WHERE guild_id = $1 AND user_id = $2",
         guild_id, user_id,
+        idempotent=True,
     )
 
 
@@ -369,14 +655,20 @@ async def save_channel_lock(guild_id: int, channel_id: int, role_states: dict[in
         ON CONFLICT (guild_id, channel_id) DO UPDATE SET previous_state = EXCLUDED.previous_state
         """,
         guild_id, channel_id, json.dumps({str(k): v for k, v in role_states.items()}),
+        idempotent=True,
     )
 
 
 async def pop_channel_lock(guild_id: int, channel_id: int) -> dict[int, str] | None:
     """Return {role_id: tristate_string} and delete the row, or None if none recorded."""
-    row = await _fetch_one(
-        "DELETE FROM channel_locks WHERE guild_id = $1 AND channel_id = $2 RETURNING previous_state",
-        guild_id, channel_id,
+    # Not idempotent: a retry after a successful delete would report "no saved state"
+    # and the channel's original permissions would be lost.
+    row = await _run(
+        lambda conn: conn.fetchrow(
+            "DELETE FROM channel_locks WHERE guild_id = $1 AND channel_id = $2 RETURNING previous_state",
+            guild_id, channel_id,
+        ),
+        idempotent=False,
     )
     if row is None:
         return None
@@ -389,13 +681,20 @@ async def pop_channel_lock(guild_id: int, channel_id: int) -> dict[int, str] | N
 # --- Health checks -----------------------------------------------------------
 
 async def check_connection() -> tuple[bool, str]:
+    """Round-trip a trivial query. Returns (ok, latency or error text).
+
+    Error text is the exception class name only — the full message may contain
+    connection details that should not reach an HTTP endpoint or a Discord embed.
+    """
+    if not is_connected():
+        return False, _last_failure or "pool is not open"
     try:
         started = _time.perf_counter()
         await _fetch_val("SELECT 1")
         elapsed_ms = (_time.perf_counter() - started) * 1000
         return True, f"{elapsed_ms:.1f}ms"
     except Exception as error:
-        return False, str(error)
+        return False, f"{type(error).__name__}: query failed"
 
 
 async def get_total_case_count() -> int:

@@ -75,7 +75,7 @@ class ServerLogs(commands.Cog):
         if message.attachments:
             embed.add_field(
                 name=f"Attachments ({len(message.attachments)})",
-                value="\n".join(f"`{a.filename}`" for a in message.attachments),
+                value=_short("\n".join(f"`{a.filename}`" for a in message.attachments)),
                 inline=False,
             )
         await post_to_server_log_channel(message.guild, embed)
@@ -144,7 +144,9 @@ class ServerLogs(commands.Cog):
             embed.add_field(name="Joined", value=discord.utils.format_dt(member.joined_at, "R"), inline=True)
         roles = [r.mention for r in member.roles if r != member.guild.default_role]
         if roles:
-            embed.add_field(name="Roles", value=", ".join(roles), inline=False)
+            # Unclamped this overflows the 1024-char field limit on role-heavy members,
+            # and Discord then rejects the entire embed - losing the log entry outright.
+            embed.add_field(name="Roles", value=_short(", ".join(roles)), inline=False)
         await post_to_server_log_channel(member.guild, embed)
 
     @commands.Cog.listener()
@@ -192,9 +194,9 @@ class ServerLogs(commands.Cog):
             _author(embed, after)
             embed.add_field(name="User", value=f"{after.mention}\n`{after.id}`", inline=True)
             if added:
-                embed.add_field(name="Added", value=", ".join(r.mention for r in added), inline=False)
+                embed.add_field(name="Added", value=_short(", ".join(r.mention for r in added)), inline=False)
             if removed:
-                embed.add_field(name="Removed", value=", ".join(r.mention for r in removed), inline=False)
+                embed.add_field(name="Removed", value=_short(", ".join(r.mention for r in removed)), inline=False)
             await post_to_server_log_channel(guild, embed)
 
     # -----------------------------------------------------------------------

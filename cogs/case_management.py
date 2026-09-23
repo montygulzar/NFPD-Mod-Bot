@@ -26,6 +26,7 @@ from embeds import (
     format_timestamp,
     style_for,
 )
+from guards import has_tier
 from modlog import post_to_log_channel
 from views import CasesPaginatorView
 
@@ -48,7 +49,7 @@ class CaseManagement(commands.Cog):
     @commands.hybrid_command(name="cases", description="View a member's moderation history")
     @app_commands.describe(member="The member to look up")
     @commands.guild_only()
-    @commands.has_permissions(kick_members=True)
+    @has_tier("cr")
     async def cases(self, ctx: commands.Context, member: discord.Member):
         case_rows = await get_cases_for_user(ctx.guild.id, member.id)
         if not case_rows:
@@ -61,7 +62,7 @@ class CaseManagement(commands.Cog):
     @commands.hybrid_command(name="casesearch", description="Look up a single case by its ID")
     @app_commands.describe(case_id="The case number to look up")
     @commands.guild_only()
-    @commands.has_permissions(kick_members=True)
+    @has_tier("cr")
     async def casesearch(self, ctx: commands.Context, case_id: int):
         case_row = await get_case_by_id(ctx.guild.id, case_id)
         if case_row is None:
@@ -99,7 +100,7 @@ class CaseManagement(commands.Cog):
     @commands.hybrid_command(name="caseedit", description="Correct the reason on an existing case")
     @app_commands.describe(case_id="The case number to edit", new_reason="The corrected reason")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("cr")
     async def caseedit(self, ctx: commands.Context, case_id: int, *, new_reason: str):
         if len(new_reason) > AUDIT_REASON_LIMIT:
             await ctx.send(
@@ -122,7 +123,7 @@ class CaseManagement(commands.Cog):
     @commands.hybrid_command(name="casedelete", description="Permanently delete a case record")
     @app_commands.describe(case_id="The case number to delete")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("cr")
     async def casedelete(self, ctx: commands.Context, case_id: int):
         if not await delete_case(ctx.guild.id, case_id):
             await ctx.send(embed=build_notice_embed(f"No case #{case_id} in this server.", success=False))
@@ -135,7 +136,7 @@ class CaseManagement(commands.Cog):
 
     @commands.hybrid_command(name="caseexport", description="Export this server's full case history as a CSV file")
     @commands.guild_only()
-    @commands.has_permissions(manage_guild=True)
+    @has_tier("cr")
     async def caseexport(self, ctx: commands.Context):
         case_rows = await get_all_cases(ctx.guild.id)
         if not case_rows:
@@ -157,7 +158,7 @@ class CaseManagement(commands.Cog):
 
     @commands.hybrid_command(name="modstats", description="Moderation activity overview for this server")
     @commands.guild_only()
-    @commands.has_permissions(kick_members=True)
+    @has_tier("cr")
     async def modstats(self, ctx: commands.Context):
         action_counts = await get_action_counts(ctx.guild.id)
         top_moderators = await get_top_moderators(ctx.guild.id)
