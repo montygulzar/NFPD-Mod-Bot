@@ -41,7 +41,7 @@ _TIER_LABELS: dict[str, str] = {
 }
 
 _TIER_DENIALS: dict[str, str] = {
-    "mod": "Only members with **Moderator+** can use this command.",
+    "mod": "Only users who are part of the **North Florida Moderation Team+** can use this command.",
     "ban_perm": "Only members with **Ban Permissions+** can use this command.",
     "cr": "Only users who are **Chief Ranks+** can use this command.",
     "management": "Only users who are **Management Team+** can use this command.",
