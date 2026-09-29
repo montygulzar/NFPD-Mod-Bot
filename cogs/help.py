@@ -12,6 +12,7 @@ CATEGORIES = {
     "ChannelModeration": ("Channels",         "\U0001F512", "Purge, slowmode and lockdowns"),
     "GlobalModeration":  ("Global",           "\U0001F310", "Actions across every NFPD server"),
     "Settings":          ("Settings",         "⚙️", "Log channels, raid and warn config"),
+    "AltDetector":       ("Alt Detection",    "\U0001F916", "Alt account alerts and config"),
     "Backup":            ("Backups",          "\U0001F4BE", "Snapshot and restore roles/channels"),
     "Owner":             ("Developer",        "\U0001F6E0️", "Bot management"),
     "Debug":             ("Diagnostics",      "\U0001FA7A", "Health and debug reports"),

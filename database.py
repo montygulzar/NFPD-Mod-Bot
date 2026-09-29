@@ -94,6 +94,7 @@ SCHEMA_STATEMENTS = (
         guild_id                  BIGINT PRIMARY KEY,
         log_channel_id            BIGINT,
         server_log_channel_id     BIGINT,
+        alt_log_channel_id        BIGINT,
         lockdown_role_id          BIGINT,
         raid_min_account_age_hours INTEGER,
         warn_mute_threshold        INTEGER,
@@ -133,6 +134,7 @@ SCHEMA_STATEMENTS = (
 # an already-created table and silently leave the new column missing.
 MIGRATION_STATEMENTS = (
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS server_log_channel_id BIGINT",
+    "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS alt_log_channel_id    BIGINT",
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_mute_threshold   INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_mute_minutes     INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_kick_threshold   INTEGER",
@@ -511,6 +513,7 @@ async def get_most_warned_users(guild_id: int, limit: int = 5) -> list[asyncpg.R
 DEFAULT_SETTINGS: dict = {
     "log_channel_id": None,
     "server_log_channel_id": None,
+    "alt_log_channel_id": None,
     "lockdown_role_id": None,
     "raid_min_account_age_hours": None,
     "warn_mute_threshold": None,
@@ -552,6 +555,10 @@ async def set_log_channel(guild_id: int, channel_id: int) -> None:
 
 async def set_server_log_channel(guild_id: int, channel_id: int | None) -> None:
     await _upsert_settings(guild_id, "server_log_channel_id", channel_id)
+
+
+async def set_alt_log_channel(guild_id: int, channel_id: int | None) -> None:
+    await _upsert_settings(guild_id, "alt_log_channel_id", channel_id)
 
 
 async def set_lockdown_role(guild_id: int, role_id: int | None) -> None:
