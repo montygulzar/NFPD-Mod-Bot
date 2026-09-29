@@ -44,6 +44,7 @@ INITIAL_COGS = (
     "cogs.server_logs",
     "cogs.alt_detector",
     "cogs.backup",
+    "cogs.help",
 )
 
 
