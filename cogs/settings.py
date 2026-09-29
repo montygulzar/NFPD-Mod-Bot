@@ -48,6 +48,12 @@ class Settings(commands.Cog):
         else:
             server_log_display = f"{mod_log_display} *(same as mod-log)*"
 
+        alt_log_id = config.get("alt_log_channel_id")
+        if alt_log_id:
+            alt_log_display = await _channel_display(ctx.guild, alt_log_id)
+        else:
+            alt_log_display = f"{server_log_display} *(same as server-log)*"
+
         lockdown_roles = [ctx.guild.get_role(r) for r in lockdown_role_ids if ctx.guild.get_role(r)]
         lockdown_value = (
             ", ".join(r.mention for r in lockdown_roles)
@@ -58,7 +64,7 @@ class Settings(commands.Cog):
         embed = base_embed(f"Settings  \u2022  {ctx.guild.name}", NEUTRAL_COLOR)
         embed.add_field(name="Mod-log channel", value=mod_log_display, inline=True)
         embed.add_field(name="Server-log channel", value=server_log_display, inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True)  # spacer to keep grid tidy
+        embed.add_field(name="Alt-alert channel", value=alt_log_display, inline=True)
         embed.add_field(name="Lockdown roles", value=lockdown_value, inline=False)
         embed.add_field(
             name="Raid protection",

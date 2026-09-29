@@ -78,6 +78,22 @@ async def post_to_log_channel(guild: discord.Guild, embed: discord.Embed) -> Non
     await _send_to_channel(guild, channel_id, embed)
 
 
+async def post_to_alt_log_channel(guild: discord.Guild, embed: discord.Embed) -> None:
+    """Post an alt-detection embed to the guild's alt-log channel.
+
+    Falls back to the server-log channel, then the mod-log channel.
+    """
+    settings = await get_guild_settings(guild.id)
+    channel_id = (
+        settings.get("alt_log_channel_id")
+        or settings.get("server_log_channel_id")
+        or settings.get("log_channel_id")
+    )
+    if channel_id is None:
+        return
+    await _send_to_channel(guild, channel_id, embed)
+
+
 async def post_to_server_log_channel(guild: discord.Guild, embed: discord.Embed) -> None:
     """Post a server event embed to the server-log channel.
 
