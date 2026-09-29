@@ -182,12 +182,7 @@ class GuildGuard(commands.Cog):
         )
         embed.add_field(name="Server", value=f"{guild.name}\n`{guild.id}`", inline=True)
         embed.add_field(name="Members", value=str(guild.member_count or 0), inline=True)
-        for owner_id in OWNER_IDS:
-            try:
-                owner = self.bot.get_user(owner_id) or await self.bot.fetch_user(owner_id)
-                await owner.send(embed=embed)
-            except discord.HTTPException:
-                continue
+        await self.alert_owners(embed)
 
 
 async def setup(bot: commands.Bot):

@@ -36,6 +36,7 @@ class Settings(commands.Cog):
     @commands.guild_only()
     @has_tier("ownership")
     async def settings(self, ctx: commands.Context):
+        await ctx.defer()
         config = await get_guild_settings(ctx.guild.id)
         lockdown_role_ids = await get_lockdown_role_ids(ctx.guild.id)
         raid_hours = config["raid_min_account_age_hours"]

@@ -51,6 +51,7 @@ class CaseManagement(commands.Cog):
     @commands.guild_only()
     @has_tier("cr")
     async def cases(self, ctx: commands.Context, member: discord.Member):
+        await ctx.defer()
         case_rows = await get_cases_for_user(ctx.guild.id, member.id)
         if not case_rows:
             await ctx.send(embed=build_notice_embed(f"{member.mention} has a clean record."))
@@ -64,6 +65,7 @@ class CaseManagement(commands.Cog):
     @commands.guild_only()
     @has_tier("cr")
     async def casesearch(self, ctx: commands.Context, case_id: int):
+        await ctx.defer()
         case_row = await get_case_by_id(ctx.guild.id, case_id)
         if case_row is None:
             await ctx.send(embed=build_notice_embed(f"No case #{case_id} in this server.", success=False))
@@ -102,6 +104,7 @@ class CaseManagement(commands.Cog):
     @commands.guild_only()
     @has_tier("cr")
     async def caseedit(self, ctx: commands.Context, case_id: int, *, new_reason: str):
+        await ctx.defer()
         if len(new_reason) > AUDIT_REASON_LIMIT:
             await ctx.send(
                 embed=build_notice_embed(
@@ -125,6 +128,7 @@ class CaseManagement(commands.Cog):
     @commands.guild_only()
     @has_tier("cr")
     async def casedelete(self, ctx: commands.Context, case_id: int):
+        await ctx.defer()
         if not await delete_case(ctx.guild.id, case_id):
             await ctx.send(embed=build_notice_embed(f"No case #{case_id} in this server.", success=False))
             return
@@ -138,6 +142,7 @@ class CaseManagement(commands.Cog):
     @commands.guild_only()
     @has_tier("cr")
     async def caseexport(self, ctx: commands.Context):
+        await ctx.defer()
         case_rows = await get_all_cases(ctx.guild.id)
         if not case_rows:
             await ctx.send(embed=build_notice_embed("No cases recorded in this server yet.", success=False))
@@ -160,6 +165,7 @@ class CaseManagement(commands.Cog):
     @commands.guild_only()
     @has_tier("cr")
     async def modstats(self, ctx: commands.Context):
+        await ctx.defer()
         action_counts = await get_action_counts(ctx.guild.id)
         top_moderators = await get_top_moderators(ctx.guild.id)
         most_warned = await get_most_warned_users(ctx.guild.id)
