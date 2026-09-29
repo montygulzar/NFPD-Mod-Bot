@@ -66,10 +66,13 @@ class ServerLogs(commands.Cog):
         if message.guild is None or message.author.bot:
             return
 
+        _, moderator = await _get_audit_entry(message.guild, message.author.id, discord.AuditLogAction.message_delete)
         embed = _base("\U0001F5D1  Message Deleted", COLOR_DELETE)
         _author(embed, message.author)
         embed.add_field(name="Author", value=f"{message.author.mention} `{message.author.id}`", inline=True)
         embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+        if moderator and moderator.id != message.author.id:
+            embed.add_field(name="Deleted by", value=moderator.mention, inline=True)
         if message.content:
             embed.add_field(name="Content", value=_short(message.content, 900), inline=False)
         if message.attachments:
@@ -84,12 +87,16 @@ class ServerLogs(commands.Cog):
     async def on_bulk_message_delete(self, messages: list[discord.Message]) -> None:
         if not messages or messages[0].guild is None:
             return
+        guild = messages[0].guild
         non_bot = [m for m in messages if not m.author.bot]
+        _, moderator = await _get_audit_entry(guild, messages[0].channel.id, discord.AuditLogAction.message_bulk_delete)
         embed = _base("\U0001F5D1  Bulk Message Delete", COLOR_DELETE)
         embed.add_field(name="Channel", value=messages[0].channel.mention, inline=True)
         embed.add_field(name="User messages removed", value=str(len(non_bot)), inline=True)
         embed.add_field(name="Total removed", value=str(len(messages)), inline=True)
-        await post_to_server_log_channel(messages[0].guild, embed)
+        if moderator:
+            embed.add_field(name="Deleted by", value=moderator.mention, inline=True)
+        await post_to_server_log_channel(guild, embed)
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
@@ -180,19 +187,25 @@ class ServerLogs(commands.Cog):
         guild = before.guild
 
         if before.nick != after.nick:
+            _, moderator = await _get_audit_entry(guild, after.id, discord.AuditLogAction.member_update)
             embed = _base("\U0001F3F7  Nickname Changed", COLOR_NICKNAME)
             _author(embed, after)
             embed.add_field(name="User", value=f"{after.mention}\n`{after.id}`", inline=True)
             embed.add_field(name="Before", value=before.nick or "*none*", inline=True)
             embed.add_field(name="After", value=after.nick or "*none*", inline=True)
+            if moderator and moderator.id != after.id:
+                embed.add_field(name="Changed by", value=moderator.mention, inline=True)
             await post_to_server_log_channel(guild, embed)
 
         added = [r for r in after.roles if r not in before.roles and r != guild.default_role]
         removed = [r for r in before.roles if r not in after.roles and r != guild.default_role]
         if added or removed:
+            _, moderator = await _get_audit_entry(guild, after.id, discord.AuditLogAction.member_role_update)
             embed = _base("\U0001F6E1  Member Roles Updated", COLOR_ROLE)
             _author(embed, after)
             embed.add_field(name="User", value=f"{after.mention}\n`{after.id}`", inline=True)
+            if moderator:
+                embed.add_field(name="Updated by", value=moderator.mention, inline=True)
             if added:
                 embed.add_field(name="Added", value=_short(", ".join(r.mention for r in added)), inline=False)
             if removed:
@@ -236,21 +249,27 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel) -> None:
+        _, moderator = await _get_audit_entry(channel.guild, channel.id, discord.AuditLogAction.channel_create)
         embed = _base("\u2795  Channel Created", COLOR_CHANNEL)
         embed.add_field(name="Name", value=channel.mention, inline=True)
         embed.add_field(name="Type", value=str(channel.type).replace("_", " ").title(), inline=True)
         if hasattr(channel, "category") and channel.category:
             embed.add_field(name="Category", value=channel.category.name, inline=True)
+        if moderator:
+            embed.add_field(name="Created by", value=moderator.mention, inline=True)
         await post_to_server_log_channel(channel.guild, embed)
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel) -> None:
+        _, moderator = await _get_audit_entry(channel.guild, channel.id, discord.AuditLogAction.channel_delete)
         embed = _base("\u2796  Channel Deleted", COLOR_DELETE)
         embed.add_field(name="Name", value=f"`#{channel.name}`", inline=True)
         embed.add_field(name="Type", value=str(channel.type).replace("_", " ").title(), inline=True)
         embed.add_field(name="ID", value=f"`{channel.id}`", inline=True)
         if hasattr(channel, "category") and channel.category:
             embed.add_field(name="Category", value=channel.category.name, inline=True)
+        if moderator:
+            embed.add_field(name="Deleted by", value=moderator.mention, inline=True)
         await post_to_server_log_channel(channel.guild, embed)
 
     @commands.Cog.listener()
@@ -271,8 +290,11 @@ class ServerLogs(commands.Cog):
         if not changes:
             return
 
+        _, moderator = await _get_audit_entry(after.guild, after.id, discord.AuditLogAction.channel_update)
         embed = _base("\u270F  Channel Updated", COLOR_CHANNEL)
         embed.add_field(name="Channel", value=after.mention, inline=False)
+        if moderator:
+            embed.add_field(name="Updated by", value=moderator.mention, inline=True)
         for name, old, new in changes:
             embed.add_field(name=name, value=f"{old} - {new}", inline=False)
         await post_to_server_log_channel(after.guild, embed)
@@ -283,18 +305,24 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role) -> None:
+        _, moderator = await _get_audit_entry(role.guild, role.id, discord.AuditLogAction.role_create)
         embed = _base("\U0001F6E1  Role Created", COLOR_ROLE)
         embed.add_field(name="Name", value=role.mention, inline=True)
         embed.add_field(name="Color", value=str(role.color), inline=True)
         embed.add_field(name="ID", value=f"`{role.id}`", inline=True)
+        if moderator:
+            embed.add_field(name="Created by", value=moderator.mention, inline=True)
         await post_to_server_log_channel(role.guild, embed)
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role) -> None:
+        _, moderator = await _get_audit_entry(role.guild, role.id, discord.AuditLogAction.role_delete)
         embed = _base("\U0001F6E1  Role Deleted", COLOR_DELETE)
         embed.add_field(name="Name", value=f"@{role.name}", inline=True)
         embed.add_field(name="Color", value=str(role.color), inline=True)
         embed.add_field(name="ID", value=f"`{role.id}`", inline=True)
+        if moderator:
+            embed.add_field(name="Deleted by", value=moderator.mention, inline=True)
         await post_to_server_log_channel(role.guild, embed)
 
     @commands.Cog.listener()
@@ -311,8 +339,11 @@ class ServerLogs(commands.Cog):
         if not changes:
             return
 
+        _, moderator = await _get_audit_entry(after.guild, after.id, discord.AuditLogAction.role_update)
         embed = _base("\U0001F6E1  Role Updated", COLOR_ROLE)
         embed.add_field(name="Role", value=after.mention, inline=False)
+        if moderator:
+            embed.add_field(name="Updated by", value=moderator.mention, inline=True)
         for name, old, new in changes:
             embed.add_field(name=name, value=f"{old} - {new}", inline=False)
         await post_to_server_log_channel(after.guild, embed)
