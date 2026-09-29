@@ -362,7 +362,13 @@ class ServerLogs(commands.Cog):
             embed.add_field(name="Created by", value=f"{invite.inviter.mention}", inline=True)
         if invite.channel:
             embed.add_field(name="Channel", value=invite.channel.mention, inline=True)
-        embed.add_field(name="Expires", value="Never" if invite.max_age == 0 else f"{invite.max_age // 3600}h", inline=True)
+        if invite.max_age == 0:
+            expires = "Never"
+        elif invite.max_age < 3600:
+            expires = f"{invite.max_age // 60}m"
+        else:
+            expires = f"{invite.max_age // 3600}h"
+        embed.add_field(name="Expires", value=expires, inline=True)
         embed.add_field(name="Max uses", value="Unlimited" if invite.max_uses == 0 else str(invite.max_uses), inline=True)
         await post_to_server_log_channel(invite.guild, embed)
 

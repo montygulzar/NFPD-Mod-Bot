@@ -97,6 +97,7 @@ class ModBot(commands.Bot):
 
         try:
             synced = await self.tree.sync()
+            self.app_command_ids = {cmd.name: cmd.id for cmd in synced}
             logger.info("Synced %d slash command(s)", len(synced))
         except discord.HTTPException as error:
             # Usually a rate limit. The bot still works via prefix commands and the

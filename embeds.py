@@ -198,6 +198,7 @@ def build_ban_dm_embed(
     embed.set_footer(text="North Florida City Police Department", icon_url=BRAND_ICON_URL)
     return embed
 
+
 def build_notice_embed(message: str, *, success: bool = True) -> discord.Embed:
     return discord.Embed(
         description=clamp(message, EMBED_DESCRIPTION_LIMIT, empty="Done."),

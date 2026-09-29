@@ -49,7 +49,8 @@ def in_container() -> bool:
     if Path("/.dockerenv").exists():
         return True
     try:
-        return "docker" in Path("/proc/1/cgroup").read_text() or "containerd" in Path("/proc/1/cgroup").read_text()
+        cgroup = Path("/proc/1/cgroup").read_text()
+        return "docker" in cgroup or "containerd" in cgroup
     except OSError:
         return False
 
