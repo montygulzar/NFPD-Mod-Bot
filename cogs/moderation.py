@@ -4,7 +4,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from database import add_temp_ban, get_guild_settings, get_warn_count, remove_temp_ban
+from database import (
+    add_temp_ban,
+    get_guild_settings,
+    get_suspended_member,
+    get_warn_count,
+    remove_suspended_member,
+    remove_temp_ban,
+    save_suspended_member,
+)
 from embeds import audit_reason, build_ban_dm_embed, build_dm_notice_embed, build_notice_embed
 from guards import has_tier, refusal_reason
 from modlog import announce_case, record_case, try_dm
@@ -245,6 +253,112 @@ class Moderation(commands.Cog):
             )
             return
         await announce_case(ctx, member, "unmute", reason)
+
+
+    @commands.hybrid_command(name="suspend", description="Remove all roles and assign the suspended role")
+    @app_commands.describe(member="The member to suspend", reason="Why they're being suspended")
+    @commands.guild_only()
+    @has_tier("mod")
+    @commands.bot_has_permissions(manage_roles=True)
+    async def suspend(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
+        refusal = refusal_reason(ctx.author, member, self.bot.user.id)
+        if refusal:
+            await ctx.send(embed=build_notice_embed(refusal, success=False))
+            return
+
+        await ctx.defer()
+
+        settings = await get_guild_settings(ctx.guild.id)
+        suspended_role_id = settings.get("suspended_role_id")
+        if not suspended_role_id:
+            await ctx.send(embed=build_notice_embed(
+                "No suspended role configured. Use `/setsuspendedrole` first.", success=False,
+            ))
+            return
+
+        suspended_role = ctx.guild.get_role(suspended_role_id)
+        if not suspended_role:
+            await ctx.send(embed=build_notice_embed(
+                "The configured suspended role no longer exists. Use `/setsuspendedrole` to set a new one.",
+                success=False,
+            ))
+            return
+
+        if await get_suspended_member(ctx.guild.id, member.id) is not None:
+            await ctx.send(embed=build_notice_embed(
+                f"{member.mention} is already suspended.", success=False,
+            ))
+            return
+
+        bot_top = ctx.guild.me.top_role
+        removable = [
+            r for r in member.roles
+            if r != ctx.guild.default_role
+            and not r.managed
+            and r < bot_top
+            and r != suspended_role
+        ]
+
+        await save_suspended_member(ctx.guild.id, member.id, [r.id for r in removable])
+
+        try:
+            await member.add_roles(suspended_role, reason=audit_reason(ctx.author, "Suspend", reason))
+            if removable:
+                await member.remove_roles(*removable, reason=audit_reason(ctx.author, "Suspend", reason))
+        except discord.HTTPException as error:
+            await remove_suspended_member(ctx.guild.id, member.id)
+            await ctx.send(embed=build_notice_embed(
+                f"Failed to suspend {member.mention}: `{error}`", success=False,
+            ))
+            return
+
+        await notify_member(member, "suspend", ctx.guild.name, reason)
+        embed = await record_case(ctx.guild, member, ctx.author, "suspend", reason)
+        embed.add_field(name="Roles removed", value=str(len(removable)), inline=True)
+        kept = [r for r in member.roles if r != ctx.guild.default_role and r not in removable and r != suspended_role]
+        if kept:
+            embed.add_field(name="Kept (managed)", value=", ".join(r.mention for r in kept), inline=False)
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="unsuspend", description="Restore a suspended member's roles")
+    @app_commands.describe(member="The member to unsuspend", reason="Why they're being unsuspended")
+    @commands.guild_only()
+    @has_tier("mod")
+    @commands.bot_has_permissions(manage_roles=True)
+    async def unsuspend(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
+        await ctx.defer()
+
+        saved_role_ids = await get_suspended_member(ctx.guild.id, member.id)
+        if saved_role_ids is None:
+            await ctx.send(embed=build_notice_embed(
+                f"{member.mention} is not currently suspended.", success=False,
+            ))
+            return
+
+        settings = await get_guild_settings(ctx.guild.id)
+        suspended_role_id = settings.get("suspended_role_id")
+        suspended_role = ctx.guild.get_role(suspended_role_id) if suspended_role_id else None
+
+        bot_top = ctx.guild.me.top_role
+        roles_to_add = [
+            ctx.guild.get_role(rid) for rid in saved_role_ids
+        ]
+        roles_to_add = [r for r in roles_to_add if r is not None and r < bot_top]
+
+        try:
+            if roles_to_add:
+                await member.add_roles(*roles_to_add, reason=audit_reason(ctx.author, "Unsuspend", reason))
+            if suspended_role and suspended_role in member.roles:
+                await member.remove_roles(suspended_role, reason=audit_reason(ctx.author, "Unsuspend", reason))
+        except discord.HTTPException as error:
+            await ctx.send(embed=build_notice_embed(
+                f"Partially restored roles for {member.mention}: `{error}`", success=False,
+            ))
+
+        await remove_suspended_member(ctx.guild.id, member.id)
+        embed = await record_case(ctx.guild, member, ctx.author, "unsuspend", reason)
+        embed.add_field(name="Roles restored", value=str(len(roles_to_add)), inline=True)
+        await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):
