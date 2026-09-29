@@ -127,6 +127,15 @@ SCHEMA_STATEMENTS = (
         PRIMARY KEY (guild_id, channel_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS suspended_members (
+        guild_id      BIGINT NOT NULL,
+        user_id       BIGINT NOT NULL,
+        role_ids      TEXT NOT NULL,
+        suspended_at  TEXT NOT NULL,
+        PRIMARY KEY (guild_id, user_id)
+    )
+    """,
 )
 
 # Columns added after the first release. Applied with ADD COLUMN IF NOT EXISTS so an
@@ -139,6 +148,7 @@ MIGRATION_STATEMENTS = (
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_mute_minutes     INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_kick_threshold   INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_ban_threshold    INTEGER",
+    "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS suspended_role_id     BIGINT",
 )
 
 
@@ -520,6 +530,7 @@ DEFAULT_SETTINGS: dict = {
     "warn_mute_minutes": None,
     "warn_kick_threshold": None,
     "warn_ban_threshold": None,
+    "suspended_role_id": None,
 }
 
 # Columns _upsert_settings is allowed to write. The column name is interpolated into
@@ -563,6 +574,10 @@ async def set_alt_log_channel(guild_id: int, channel_id: int | None) -> None:
 
 async def set_lockdown_role(guild_id: int, role_id: int | None) -> None:
     await _upsert_settings(guild_id, "lockdown_role_id", role_id)
+
+
+async def set_suspended_role(guild_id: int, role_id: int | None) -> None:
+    await _upsert_settings(guild_id, "suspended_role_id", role_id)
 
 
 async def set_raid_protection(guild_id: int, min_account_age_hours: int | None) -> None:
@@ -710,3 +725,40 @@ async def get_total_case_count() -> int:
 
 async def get_active_temp_ban_count() -> int:
     return (await _fetch_val("SELECT COUNT(*) FROM temp_bans")) or 0
+
+
+# --- Suspended members -------------------------------------------------------
+
+async def save_suspended_member(guild_id: int, user_id: int, role_ids: list[int]) -> None:
+    await _execute(
+        """
+        INSERT INTO suspended_members (guild_id, user_id, role_ids, suspended_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (guild_id, user_id) DO UPDATE
+            SET role_ids = EXCLUDED.role_ids, suspended_at = EXCLUDED.suspended_at
+        """,
+        guild_id, user_id, json.dumps(role_ids),
+        datetime.now(timezone.utc).isoformat(),
+        idempotent=True,
+    )
+
+
+async def get_suspended_member(guild_id: int, user_id: int) -> list[int] | None:
+    row = await _fetch_one(
+        "SELECT role_ids FROM suspended_members WHERE guild_id = $1 AND user_id = $2",
+        guild_id, user_id,
+    )
+    if row is None:
+        return None
+    try:
+        return json.loads(row["role_ids"])
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+
+async def remove_suspended_member(guild_id: int, user_id: int) -> None:
+    await _execute(
+        "DELETE FROM suspended_members WHERE guild_id = $1 AND user_id = $2",
+        guild_id, user_id,
+        idempotent=True,
+    )

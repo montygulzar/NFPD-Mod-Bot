@@ -30,6 +30,8 @@ ACTION_STYLES = {
     "global_kick":   ActionStyle(0xB84A2E, "\U0001F6AA", "Global Kick",   "You were removed from all servers."),
     "global_ban":    ActionStyle(0xA32828, "\U0001F6D1", "Global Ban",    "You were banned across all servers."),
     "global_unban":  ActionStyle(SUCCESS_COLOR, "\U0001F513", "Global Unban", ""),
+    "suspend":       ActionStyle(0xA855F7, "\U0001F512", "Suspend",      "You were suspended in {location}."),
+    "unsuspend":     ActionStyle(SUCCESS_COLOR, "\U0001F513", "Unsuspend", ""),
 }
 
 FALLBACK_STYLE = ActionStyle(NEUTRAL_COLOR, "\U0001F4CB", "Action", "")

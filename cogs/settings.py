@@ -8,6 +8,7 @@ from database import (
     set_log_channel,
     set_raid_protection,
     set_server_log_channel,
+    set_suspended_role,
     set_warn_thresholds,
 )
 from embeds import NEUTRAL_COLOR, base_embed, build_notice_embed
@@ -66,7 +67,15 @@ class Settings(commands.Cog):
         embed.add_field(name="Mod-log channel", value=mod_log_display, inline=True)
         embed.add_field(name="Server-log channel", value=server_log_display, inline=True)
         embed.add_field(name="Alt-alert channel", value=alt_log_display, inline=True)
+        suspended_role_id = config.get("suspended_role_id")
+        if suspended_role_id:
+            sr = ctx.guild.get_role(suspended_role_id)
+            suspended_display = sr.mention if sr else f"`{suspended_role_id}` *(not found)*"
+        else:
+            suspended_display = "Not set"
+
         embed.add_field(name="Lockdown roles", value=lockdown_value, inline=False)
+        embed.add_field(name="Suspended role", value=suspended_display, inline=True)
         embed.add_field(
             name="Raid protection",
             value=f"Flag accounts under {raid_hours}h old" if raid_hours else "Disabled",
@@ -164,6 +173,31 @@ class Settings(commands.Cog):
             return
 
         await ctx.send(embed=build_notice_embed(f"Test message sent to {channel.mention}."))
+
+    @commands.hybrid_command(
+        name="setsuspendedrole",
+        description="Set the role assigned when a member is suspended",
+    )
+    @app_commands.describe(role="The role to assign on /suspend, or leave blank to clear")
+    @commands.guild_only()
+    @has_tier("ownership")
+    async def setsuspendedrole(self, ctx: commands.Context, role: discord.Role | None = None):
+        if role and role >= ctx.guild.me.top_role:
+            await ctx.send(embed=build_notice_embed(
+                "That role is at or above my highest role — I won't be able to assign it.", success=False,
+            ))
+            return
+        if role and role.managed:
+            await ctx.send(embed=build_notice_embed(
+                "Managed roles (bot/integration roles) can't be used as the suspended role.", success=False,
+            ))
+            return
+
+        await set_suspended_role(ctx.guild.id, role.id if role else None)
+        if role:
+            await ctx.send(embed=build_notice_embed(f"Suspended role set to {role.mention}."))
+        else:
+            await ctx.send(embed=build_notice_embed("Suspended role cleared."))
 
     @commands.hybrid_command(
         name="setraidprotection",
