@@ -10,7 +10,9 @@ Two endpoints, with the distinction that matters to Docker:
                           watching on the monitoring network.
 
 Deliberately not published to the host in the compose file - it is reachable only
-from inside the Docker network, so it needs no authentication.
+from inside the Docker network, so the read-only probes need no authentication.
+The one state-changing route, POST /internal/unban (see internal_api.py), is
+protected by INTERNAL_API_TOKEN and disabled when that is unset.
 
 aiohttp is used directly rather than pulled in for this alone: discord.py already
 depends on it, and it is declared explicitly in requirements.txt.
@@ -23,6 +25,7 @@ from aiohttp import web
 import config
 import database
 import diagnostics
+from internal_api import UnbanHandler
 
 logger = logging.getLogger("modbot.health")
 
@@ -106,6 +109,8 @@ class HealthServer:
         app = web.Application()
         app.router.add_get("/health", self._liveness)
         app.router.add_get("/ready", self._readiness)
+        # Bot-to-bot API for the Appeals Bot; token-protected, off without a token.
+        app.router.add_post("/internal/unban", UnbanHandler(self._bot))
 
         # access_log=None: every health probe would otherwise log a line, which at a
         # 30-second interval buries everything else in the container logs.

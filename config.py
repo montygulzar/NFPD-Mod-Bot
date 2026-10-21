@@ -238,6 +238,12 @@ HEALTH_SERVER_ENABLED = _parse_bool("HEALTH_SERVER_ENABLED", True)
 HEALTH_HOST = _env("HEALTH_HOST", "0.0.0.0")
 HEALTH_PORT = _parse_int("HEALTH_PORT", 8080, minimum=1, maximum=65535)
 
+# Shared secret for the private bot-to-bot API on the health server
+# (POST /internal/unban, used by the NFPD Appeals Bot's Execute Unban). That
+# endpoint changes state, so unlike /health it requires this token; leave it
+# empty and the endpoint is disabled. Must match the Appeals Bot's value.
+INTERNAL_API_TOKEN = _env("INTERNAL_API_TOKEN")
+
 
 # --- Build metadata -----------------------------------------------------------
 # Set as build args in the Dockerfile so a running container can report exactly
