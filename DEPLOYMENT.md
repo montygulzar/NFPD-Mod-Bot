@@ -110,6 +110,20 @@ Docker's `HEALTHCHECK` uses `/ready`, so a container with a failing database sho
 as `unhealthy` in `docker ps` without being restarted — restarting would not fix a
 dependency outage, and the bot reconnects on its own.
 
+### `POST /internal/unban` (Appeals Bot link)
+
+When an appeal is accepted in the NFPD Appeals Bot and staff press **Execute
+Unban**, the Appeals Bot calls this endpoint over `nodey-monitoring`
+(`http://nfpd-mod-bot:8080/internal/unban`). This bot lifts the ban in the main
+server, clears any pending tempban, and records an `unban` case in the mod log.
+
+- Requires `Authorization: Bearer <INTERNAL_API_TOKEN>`. Set the **same** value
+  in both bots' `.env` (e.g. `openssl rand -hex 32`). Unset = endpoint off (503).
+- Only acts on servers in `APPROVED_GUILD_IDS`.
+- Idempotent: if the user is no longer banned it returns `not_banned`, so a retry
+  is safe.
+- The port is still not published to the host.
+
 ## Global action exemptions
 
 `GLOBAL_ACTION_EXEMPT_GUILD_IDS` accepts a comma-separated list of Discord guild
