@@ -1,3 +1,5 @@
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -5,6 +7,8 @@ from discord.ext import commands
 from config import APPROVED_GUILD_IDS
 from embeds import NEUTRAL_COLOR, audit_reason, base_embed, build_notice_embed, clamp
 from guards import has_tier
+
+logger = logging.getLogger("modbot.owner")
 
 GUILDS_PER_EMBED = 10
 
@@ -99,6 +103,145 @@ class Owner(commands.Cog):
 
         await member.add_roles(role, reason=audit_reason(ctx.author, "Add role", reason))
         await ctx.send(embed=build_notice_embed(f"Added **{role.name}** to {member.mention}."))
+
+    # --- Self-service role recovery -------------------------------------------
+    # Prefix-only (commands.command, never synced to the slash tree) so these stay
+    # out of the command picker entirely, and DM-capable so they still work after
+    # you've stripped your own roles in the target server.
+
+    async def _resolve(
+        self, ctx: commands.Context, guild_id: int, role_id: int
+    ) -> tuple[discord.Guild | None, discord.Member | None, discord.Role | None, str | None]:
+        """Shared validation. Returns (guild, member, role, problem)."""
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return None, None, None, f"I'm not in any server with ID `{guild_id}`."
+        if guild.me is None or not guild.me.guild_permissions.manage_roles:
+            return None, None, None, f"I don't have Manage Roles in **{guild.name}**."
+
+        member = guild.get_member(ctx.author.id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(ctx.author.id)
+            except discord.HTTPException:
+                return None, None, None, f"You aren't a member of **{guild.name}**."
+
+        role = guild.get_role(role_id)
+        if role is None:
+            return None, None, None, f"No role with ID `{role_id}` exists in **{guild.name}**."
+        if role.managed:
+            return None, None, None, f"**{role.name}** is managed by an integration and can't be assigned."
+        if role >= guild.me.top_role:
+            return None, None, None, (
+                f"**{role.name}** is at or above my highest role in **{guild.name}**, so I can't assign it."
+            )
+        return guild, member, role, None
+
+    @commands.command(name="bypass")
+    @has_tier("development")
+    async def bypass(self, ctx: commands.Context, guild_id: int, role_id: int):
+        """Give yourself a role in any server the bot is in. Usable in DMs."""
+        guild, member, role, problem = await self._resolve(ctx, guild_id, role_id)
+        if problem:
+            await ctx.send(embed=build_notice_embed(problem, success=False))
+            return
+
+        if role in member.roles:
+            await ctx.send(
+                embed=build_notice_embed(f"You already have **{role.name}** in **{guild.name}**.", success=False)
+            )
+            return
+
+        try:
+            await member.add_roles(role, reason=audit_reason(ctx.author, "Bypass", "Self-restore"))
+        except discord.HTTPException as error:
+            await ctx.send(embed=build_notice_embed(f"Couldn't add that role: `{error}`", success=False))
+            return
+
+        # Self-granting a role is a privilege action, so it leaves a trail here as
+        # well as in the server's own audit log.
+        logger.warning(
+            "BYPASS: %s (%s) self-granted role %s (%s) in %s (%s)",
+            ctx.author, ctx.author.id, role.name, role.id, guild.name, guild.id,
+        )
+        await ctx.send(embed=build_notice_embed(f"Added **{role.name}** to you in **{guild.name}**."))
+
+    @commands.command(name="unbypass")
+    @has_tier("development")
+    async def unbypass(self, ctx: commands.Context, guild_id: int, role_id: int):
+        """Remove a role from yourself in any server the bot is in. Usable in DMs."""
+        guild, member, role, problem = await self._resolve(ctx, guild_id, role_id)
+        if problem:
+            await ctx.send(embed=build_notice_embed(problem, success=False))
+            return
+
+        if role not in member.roles:
+            await ctx.send(
+                embed=build_notice_embed(f"You don't have **{role.name}** in **{guild.name}**.", success=False)
+            )
+            return
+
+        try:
+            await member.remove_roles(role, reason=audit_reason(ctx.author, "Bypass", "Self-removal"))
+        except discord.HTTPException as error:
+            await ctx.send(embed=build_notice_embed(f"Couldn't remove that role: `{error}`", success=False))
+            return
+
+        logger.warning(
+            "BYPASS: %s (%s) self-removed role %s (%s) in %s (%s)",
+            ctx.author, ctx.author.id, role.name, role.id, guild.name, guild.id,
+        )
+        await ctx.send(embed=build_notice_embed(f"Removed **{role.name}** from you in **{guild.name}**."))
+
+    @commands.command(name="roles")
+    @has_tier("development")
+    async def roles(self, ctx: commands.Context, guild_id: int):
+        """List assignable role IDs in a server, to find one for !bypass. Usable in DMs."""
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            await ctx.send(embed=build_notice_embed(f"I'm not in any server with ID `{guild_id}`.", success=False))
+            return
+
+        member = guild.get_member(ctx.author.id)
+        held = {role.id for role in member.roles} if member else set()
+        top = guild.me.top_role if guild.me else None
+
+        lines = []
+        for role in sorted(guild.roles, reverse=True):
+            if role.is_default():
+                continue
+            if role.managed or (top is not None and role >= top):
+                marker = "⛔"  # can't be assigned by the bot
+            elif role.id in held:
+                marker = "✅"  # you already have it
+            else:
+                marker = " "
+            lines.append(f"{marker} `{role.id}`  {role.name}")
+
+        if not lines:
+            await ctx.send(embed=build_notice_embed(f"**{guild.name}** has no roles beyond @everyone."))
+            return
+
+        # Role lists overflow a single embed description on larger servers.
+        chunk: list[str] = []
+        length = 0
+        pages: list[list[str]] = []
+        for line in lines:
+            if length + len(line) + 1 > 3800:
+                pages.append(chunk)
+                chunk, length = [], 0
+            chunk.append(line)
+            length += len(line) + 1
+        pages.append(chunk)
+
+        for index, page in enumerate(pages, start=1):
+            embed = base_embed(
+                f"Roles  •  {clamp(guild.name, limit=200)}",
+                NEUTRAL_COLOR,
+                "\n".join(page),
+            )
+            embed.set_footer(text=f"Page {index}/{len(pages)}  •  ✅ you have it  ⛔ I can't assign it")
+            await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):
