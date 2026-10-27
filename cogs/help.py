@@ -1,10 +1,20 @@
 """Tier-aware /help: an embedded menu that only lists the commands you can run."""
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from config import BRAND_NAME
-from embeds import NEUTRAL_COLOR, base_embed, build_notice_embed
-from guards import _TIERS, member_tier_index, tier_index, tier_label
+from embeds import NEUTRAL_COLOR, base_embed, build_notice_embed, clamp
+from guards import (
+    _TIERS,
+    is_blocked,
+    is_protected,
+    member_tier_index,
+    special_grants,
+    tier_granting_role_ids,
+    tier_index,
+    tier_label,
+)
 
 CATEGORIES = {
     "Moderation":        ("Moderation",       "\U0001F528", "Warn, mute, kick and ban"),
@@ -81,6 +91,65 @@ def build_home_embed(bot: commands.Bot, user: discord.abc.User, user_tier: int |
     return embed
 
 
+def build_permissions_embed(
+    bot: commands.Bot,
+    target: discord.abc.User,
+    target_tier: int | None,
+    grouped,
+) -> discord.Embed:
+    """Third-person view of what another member is allowed to run."""
+    embed = base_embed(f"\U0001F50D  Permissions  •  {target}", NEUTRAL_COLOR)
+    embed.set_thumbnail(url=target.display_avatar.url)
+
+    total = sum(len(items) for items in grouped.values())
+    if target_tier is None:
+        embed.description = (
+            f"{target.mention} holds **no staff tier**, so no moderation commands are "
+            "available to them."
+        )
+    else:
+        embed.description = (
+            f"{target.mention} is **{tier_label(target_tier)}**, with **{total}** "
+            "command(s) available.\nPick a category below to see exactly which ones."
+        )
+
+    granting = tier_granting_role_ids(target)
+    if granting:
+        embed.add_field(
+            name="Tier roles",
+            value=clamp(", ".join(f"<@&{role_id}>" for role_id in granting)),
+            inline=False,
+        )
+
+    grants = special_grants(target)
+    if grants:
+        embed.add_field(name="Direct grants", value="\n".join(grants), inline=False)
+
+    if is_blocked(target.id):
+        embed.add_field(
+            name="⛔  Blocked",
+            value="This user is blocked from using the bot entirely.",
+            inline=False,
+        )
+    if is_protected(target.id):
+        embed.add_field(
+            name="\U0001F6E1  Protected",
+            value="This user can't be the target of a moderation action.",
+            inline=False,
+        )
+
+    for cog_name, (label, emoji, blurb) in CATEGORIES.items():
+        if cog_name in grouped:
+            embed.add_field(
+                name=f"{emoji}  {label}",
+                value=f"{blurb}\n`{len(grouped[cog_name])} command(s)`",
+                inline=True,
+            )
+
+    embed.add_field(name="Tiers", value=tier_ladder(target_tier), inline=False)
+    return embed
+
+
 def build_category_embed(bot: commands.Bot, cog_name: str, items) -> discord.Embed:
     label, emoji, blurb = CATEGORIES[cog_name]
     lines = []
@@ -96,13 +165,23 @@ def build_category_embed(bot: commands.Bot, cog_name: str, items) -> discord.Emb
 
 
 class HelpView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, author: discord.abc.User, user_tier: int | None, grouped):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        author: discord.abc.User,
+        user_tier: int | None,
+        grouped,
+        subject: discord.abc.User | None = None,
+    ):
         super().__init__(timeout=180)
         self.bot = bot
         self.author_id = author.id
         self.author = author
         self.user_tier = user_tier
         self.grouped = grouped
+        # None means the menu describes the author's own access; otherwise it
+        # describes `subject`, and Home renders the third-person view.
+        self.subject = subject
         self.message: discord.Message | None = None
 
         options = [discord.SelectOption(label="Home", value="__home__", emoji="\U0001F3E0", description="Back to the overview")]
@@ -139,7 +218,10 @@ class HelpView(discord.ui.View):
     async def category(self, interaction: discord.Interaction, select: discord.ui.Select):
         choice = select.values[0]
         if choice == "__home__":
-            embed = build_home_embed(self.bot, self.author, self.user_tier, self.grouped)
+            if self.subject is not None:
+                embed = build_permissions_embed(self.bot, self.subject, self.user_tier, self.grouped)
+            else:
+                embed = build_home_embed(self.bot, self.author, self.user_tier, self.grouped)
         else:
             embed = build_category_embed(self.bot, choice, self.grouped[choice])
         await interaction.response.edit_message(embed=embed, view=self)
@@ -150,12 +232,33 @@ class Help(commands.Cog):
         self.bot = bot
 
     @commands.hybrid_command(name="help", description="Show the commands you can use")
-    async def help(self, ctx: commands.Context):
-        user_tier = member_tier_index(ctx.author)
-        grouped = visible_commands(self.bot, user_tier)
-        view = HelpView(self.bot, ctx.author, user_tier, grouped)
+    @app_commands.describe(member="Optionally look up another member's permissions (staff only)")
+    async def help(self, ctx: commands.Context, member: discord.Member | None = None):
+        # No member given (or you pointed it at yourself) keeps the original
+        # first-person menu, including in DMs where the converter never runs.
+        if member is None or member.id == ctx.author.id:
+            user_tier = member_tier_index(ctx.author)
+            grouped = visible_commands(self.bot, user_tier)
+            view = HelpView(self.bot, ctx.author, user_tier, grouped)
+            view.message = await ctx.send(
+                embed=build_home_embed(self.bot, ctx.author, user_tier, grouped), view=view, ephemeral=True
+            )
+            return
+
+        if member_tier_index(ctx.author) is None:
+            await ctx.send(
+                embed=build_notice_embed(
+                    "Only staff can look up another member's permissions.", success=False
+                ),
+                ephemeral=True,
+            )
+            return
+
+        target_tier = member_tier_index(member)
+        grouped = visible_commands(self.bot, target_tier)
+        view = HelpView(self.bot, ctx.author, target_tier, grouped, subject=member)
         view.message = await ctx.send(
-            embed=build_home_embed(self.bot, ctx.author, user_tier, grouped), view=view, ephemeral=True
+            embed=build_permissions_embed(self.bot, member, target_tier, grouped), view=view, ephemeral=True
         )
 
 

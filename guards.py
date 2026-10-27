@@ -104,6 +104,26 @@ def tier_index(tier: str) -> int:
     return _TIERS.index(tier)
 
 
+def tier_granting_role_ids(user: discord.abc.User) -> list[int]:
+    """Role IDs this user holds that grant a staff tier, highest tier first."""
+    role_ids = {role.id for role in getattr(user, "roles", ())}
+    granting: list[int] = []
+    for index in range(len(_TIERS) - 1, -1, -1):
+        granting.extend(sorted(role_ids & _TIER_ROLE_IDS.get(_TIERS[index], set())))
+    return granting
+
+
+def special_grants(user: discord.abc.User) -> list[str]:
+    """Labels for access this user gets by user ID rather than by role."""
+    grants: list[str] = []
+    if user.id in OWNER_IDS:
+        grants.append("Bot owner — passes every tier check")
+    for tier, ids in _TIER_USER_IDS.items():
+        if user.id in ids:
+            grants.append(f"{_TIER_LABELS[tier]} (granted by user ID)")
+    return grants
+
+
 def tier_label(index: int | None) -> str:
     return "No staff tier" if index is None else _TIER_LABELS[_TIERS[index]]
 
