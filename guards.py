@@ -66,13 +66,19 @@ def has_tier(tier: str):
     async def predicate(ctx: commands.Context) -> bool:
         if ctx.author.id in OWNER_IDS:
             return True
+
+        # User-ID tiers carry no guild context, so they resolve in DMs too. Checked
+        # before the guild bail below, which would otherwise reject a development
+        # user running a DM-capable command.
+        for t in _TIERS[tier_index:]:
+            if t in _TIER_USER_IDS and ctx.author.id in _TIER_USER_IDS[t]:
+                return True
+
         if ctx.guild is None:
             return False
 
         author_role_ids = {role.id for role in ctx.author.roles}
         for t in _TIERS[tier_index:]:
-            if t in _TIER_USER_IDS and ctx.author.id in _TIER_USER_IDS[t]:
-                return True
             if t in _TIER_ROLE_IDS and author_role_ids & _TIER_ROLE_IDS[t]:
                 return True
 
