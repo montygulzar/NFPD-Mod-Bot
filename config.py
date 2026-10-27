@@ -147,6 +147,13 @@ PROTECTED_USER_IDS = _parse_id_list("PROTECTED_USER_IDS")
 # Users who may not USE the bot at all. Every command refuses for them.
 BLOCKED_USER_IDS = _parse_id_list("BLOCKED_USER_IDS")
 
+# Users whose activity is left out of the SERVER event log: their messages, joins,
+# leaves, voice moves, nickname and role changes, and any channel/role/invite change
+# they make. Intended to keep an owner's own routine admin work from flooding the
+# channel. Moderation cases are deliberately NOT affected - a ban or kick is still
+# recorded against whoever issued it, so the accountability trail stays intact.
+LOG_IGNORED_USER_IDS = _parse_id_list("LOG_IGNORED_USER_IDS")
+
 
 # --- Database -----------------------------------------------------------------
 
