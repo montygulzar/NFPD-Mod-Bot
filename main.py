@@ -17,6 +17,7 @@ import logging
 import signal
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 import config
@@ -166,6 +167,14 @@ def describe_error(error: BaseException) -> tuple[str, bool]:
         return f"Missing argument: `{error.param.name}`.", False
     if isinstance(error, (commands.MemberNotFound, commands.UserNotFound)):
         return "I couldn't find that user.", False
+    if isinstance(error, app_commands.TransformerError):
+        # Raised when a discord.Member parameter resolves to someone who is not in
+        # the guild (left, or is banned). Routine from a moderator's point of view,
+        # so it answers plainly rather than logging a traceback.
+        return (
+            "I couldn't find that user in this server - they may have left or been banned.",
+            False,
+        )
     if isinstance(error, commands.BadArgument):
         return "One of those arguments wasn't valid.", False
     return (

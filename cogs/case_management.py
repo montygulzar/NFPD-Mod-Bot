@@ -50,7 +50,10 @@ class CaseManagement(commands.Cog):
     @app_commands.describe(member="The member to look up")
     @commands.guild_only()
     @has_tier("cr")
-    async def cases(self, ctx: commands.Context, member: discord.Member):
+    async def cases(self, ctx: commands.Context, member: discord.User):
+        # discord.User rather than discord.Member: the history of someone who has
+        # been banned or has left is exactly what this is for, and a Member
+        # annotation raises TransformerError for anyone no longer in the guild.
         await ctx.defer()
         case_rows = await get_cases_for_user(ctx.guild.id, member.id)
         if not case_rows:
