@@ -3,6 +3,7 @@ from typing import NamedTuple
 
 import discord
 
+import config
 from config import BRAND_NAME
 
 
@@ -163,7 +164,9 @@ def build_case_line(row, guild: discord.Guild) -> tuple[str, str]:
 
 
 
-NFPD_APPEAL_URL = "https://discord.gg/xnKvzXw5Vd"
+def appeal_url() -> str:
+    """The Appeals server link for ban DMs, from APPEAL_URL in .env."""
+    return config.APPEAL_URL
 
 
 def build_ban_dm_embed(
@@ -193,7 +196,7 @@ def build_ban_dm_embed(
         name="Appeals",
         value=(
             "If you believe this ban was issued in error, you may appeal by joining the "
-            f"[NFPD Appeals server]({NFPD_APPEAL_URL})."
+            f"[NFPD Appeals server]({appeal_url()})."
         ),
         inline=False,
     )

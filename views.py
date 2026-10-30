@@ -2,7 +2,7 @@ import discord
 
 import embeds as embeds_module
 from config import BRAND_NAME
-from embeds import DANGER_COLOR, NEUTRAL_COLOR, NFPD_APPEAL_URL, build_case_line
+from embeds import DANGER_COLOR, NEUTRAL_COLOR, appeal_url, build_case_line
 
 
 class BanAppealView(discord.ui.View):
@@ -15,7 +15,7 @@ class BanAppealView(discord.ui.View):
             discord.ui.Button(
                 label="Appeal your ban",
                 style=discord.ButtonStyle.link,
-                url=NFPD_APPEAL_URL,
+                url=appeal_url(),
                 emoji="📝",
             )
         )
