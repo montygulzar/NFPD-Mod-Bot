@@ -107,6 +107,18 @@ if not COMMAND_PREFIX:
 
 BRAND_NAME = os.environ.get("BRAND_NAME", "Moderation")
 
+# Link to the NFPD Appeals server, shown in every ban DM ("Appeal your ban"
+# button and the Appeals field). Unset or blank keeps the long-standing
+# invite. Validated here because a malformed URL makes Discord reject the
+# whole DM - the banned user would get no message at all.
+DEFAULT_APPEAL_URL = "https://discord.gg/xnKvzXw5Vd"
+APPEAL_URL = _env("APPEAL_URL") or DEFAULT_APPEAL_URL
+if not APPEAL_URL.startswith(("https://", "http://")) or any(c.isspace() for c in APPEAL_URL):
+    _errors.append(
+        f"APPEAL_URL must be a full link starting with https:// (e.g. https://discord.gg/abc123), got: {APPEAL_URL!r}"
+    )
+    APPEAL_URL = DEFAULT_APPEAL_URL
+
 OWNER_IDS = _parse_id_list("OWNER_IDS")
 
 # --- Tiered role system -------------------------------------------------------
