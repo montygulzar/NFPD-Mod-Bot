@@ -16,6 +16,8 @@ class RaidProtection(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
+        if member.bot:
+            return  # A freshly created bot account is not a raid signal.
         settings = await get_guild_settings(member.guild.id)
         minimum_age_hours = settings["raid_min_account_age_hours"]
         if not minimum_age_hours:

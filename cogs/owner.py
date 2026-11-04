@@ -6,7 +6,7 @@ from discord.ext import commands
 
 from config import APPROVED_GUILD_IDS
 from embeds import NEUTRAL_COLOR, audit_reason, base_embed, build_notice_embed, clamp
-from guards import has_tier
+from guards import has_tier, refusal_reason
 
 logger = logging.getLogger("modbot.owner")
 
@@ -96,6 +96,13 @@ class Owner(commands.Cog):
     ):
         if role >= ctx.guild.me.top_role:
             await ctx.send(embed=build_notice_embed("That role is at or above my highest role.", success=False))
+            return
+        # Without this, /addrole is a way to grant the bot its own permissions, or to
+        # hand a role to someone this moderator could not otherwise act on. Use
+        # !bypass for the self-service case.
+        refusal = refusal_reason(ctx.author, member, self.bot.user.id)
+        if refusal:
+            await ctx.send(embed=build_notice_embed(refusal, success=False))
             return
         if role in member.roles:
             await ctx.send(embed=build_notice_embed(f"{member.mention} already has that role.", success=False))
