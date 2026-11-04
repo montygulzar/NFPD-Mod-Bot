@@ -190,3 +190,83 @@ async def test_warn_escalation_still_fires_on_a_valid_target():
         await cog.escalate_if_needed(ctx, target, 3)
 
     target.ban.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_skipped_escalation_is_retried_on_a_later_warn():
+    """With ==, an escalation withheld at exactly the threshold consumed it
+    permanently: warn counts past it never matched again. A later warn, once the
+    target can legitimately be actioned, must still apply the punishment."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    target = MagicMock()
+    target.ban = AsyncMock()
+    ctx = MagicMock()
+    ctx.guild.id = 1
+    ctx.send = AsyncMock()
+    bot = MagicMock()
+    bot.user.id = BOT_ID
+    cog = mod.Moderation(bot)
+
+    settings = {"warn_ban_threshold": 3, "warn_kick_threshold": None,
+                "warn_mute_threshold": None, "warn_mute_minutes": None}
+
+    # Warn 5, well past the threshold of 3, because 3 was withheld earlier.
+    with patch.object(mod, "get_guild_settings", AsyncMock(return_value=settings)), \
+         patch.object(mod, "refusal_reason", lambda *a, **k: None), \
+         patch.object(mod, "announce_case", AsyncMock()):
+        await cog.escalate_if_needed(ctx, target, 5)
+
+    target.ban.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_thresholds_pick_the_most_severe_one_crossed():
+    """setwarnthresholds enforces mute < kick < ban, so a count past several
+    thresholds must take the most severe, not the first configured."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    settings = {"warn_ban_threshold": 3, "warn_kick_threshold": 2,
+                "warn_mute_threshold": 1, "warn_mute_minutes": 60}
+    expected = {1: "mute", 2: "kick", 3: "ban", 9: "ban"}
+
+    for warn_count, want in expected.items():
+        target = MagicMock()
+        target.ban, target.kick, target.timeout = AsyncMock(), AsyncMock(), AsyncMock()
+        ctx = MagicMock(); ctx.guild.id = 1; ctx.send = AsyncMock()
+        bot = MagicMock(); bot.user.id = BOT_ID
+        cog = mod.Moderation(bot)
+
+        with patch.object(mod, "get_guild_settings", AsyncMock(return_value=settings)), \
+             patch.object(mod, "refusal_reason", lambda *a, **k: None), \
+             patch.object(mod, "announce_case", AsyncMock()):
+            await cog.escalate_if_needed(ctx, target, warn_count)
+
+        called = {"ban": target.ban, "kick": target.kick, "mute": target.timeout}
+        assert called[want].await_count == 1, f"warn {warn_count} should {want}"
+        for name, m in called.items():
+            if name != want:
+                assert m.await_count == 0, f"warn {warn_count} should not {name}"
+
+
+@pytest.mark.asyncio
+async def test_disabled_thresholds_never_escalate():
+    from unittest.mock import AsyncMock, MagicMock
+
+    target = MagicMock()
+    target.ban, target.kick, target.timeout = AsyncMock(), AsyncMock(), AsyncMock()
+    ctx = MagicMock(); ctx.guild.id = 1; ctx.send = AsyncMock()
+    bot = MagicMock(); bot.user.id = BOT_ID
+    cog = mod.Moderation(bot)
+
+    settings = {"warn_ban_threshold": None, "warn_kick_threshold": 0,
+                "warn_mute_threshold": None, "warn_mute_minutes": None}
+
+    with patch.object(mod, "get_guild_settings", AsyncMock(return_value=settings)), \
+         patch.object(mod, "refusal_reason", lambda *a, **k: None), \
+         patch.object(mod, "announce_case", AsyncMock()):
+        await cog.escalate_if_needed(ctx, target, 50)
+
+    target.ban.assert_not_called()
+    target.kick.assert_not_called()
+    target.timeout.assert_not_called()

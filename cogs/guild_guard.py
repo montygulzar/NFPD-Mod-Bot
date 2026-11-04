@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from config import APPROVED_GUILD_IDS, LEAVE_UNAPPROVED_GUILDS, OWNER_IDS
+from invites import resolve_invite
 
 logger = logging.getLogger("modbot.guild_guard")
 
@@ -14,26 +15,6 @@ UNAPPROVED_SERVER_MESSAGE = (
     "**Username:** ombdeveloping\n"
     "**Discord ID:** `1285998518213017663`"
 )
-
-
-async def resolve_invite(guild: discord.Guild) -> str | None:
-    """Try to generate a 24-hour invite from the first channel the bot can use."""
-    if guild.me is None:
-        return None
-    for channel in guild.text_channels:
-        if not channel.permissions_for(guild.me).create_instant_invite:
-            continue
-        try:
-            invite = await channel.create_invite(
-                max_age=86400,
-                max_uses=1,
-                unique=True,
-                reason="Unapproved server alert - requested by bot owner",
-            )
-            return invite.url
-        except discord.HTTPException:
-            continue
-    return None
 
 
 async def post_in_server(guild: discord.Guild, message: str) -> None:
@@ -159,7 +140,12 @@ class GuildGuard(commands.Cog):
             return
 
         # Fetch invite before potentially leaving - can't create one after the bot has left.
-        invite_url = await resolve_invite(guild)
+        invite_url = await resolve_invite(
+            guild,
+            max_uses=1,
+            unique=True,
+            reason="Unapproved server alert - requested by bot owner",
+        )
         inviter = await get_inviter(guild, self.bot.user.id)
 
         # Post notice in the server so the server owner knows why the bot left.

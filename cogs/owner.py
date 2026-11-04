@@ -7,32 +7,11 @@ from discord.ext import commands
 from config import APPROVED_GUILD_IDS
 from embeds import NEUTRAL_COLOR, audit_reason, base_embed, build_notice_embed, clamp
 from guards import has_tier
+from invites import resolve_invite
 
 logger = logging.getLogger("modbot.owner")
 
 GUILDS_PER_EMBED = 10
-
-
-async def resolve_invite(guild: discord.Guild) -> str | None:
-    """Reuse an existing invite where possible so repeated calls don't litter the server with new ones."""
-    if guild.me is None:
-        return None
-
-    for channel in guild.text_channels:
-        if not channel.permissions_for(guild.me).create_instant_invite:
-            continue
-        try:
-            invite = await channel.create_invite(
-                max_age=86400,  # 24 hours. Avoids leaving permanent invites lying around.
-                max_uses=0,
-                unique=False,
-                reason="Requested by bot owner",
-            )
-            return invite.url
-        except discord.HTTPException:
-            continue
-
-    return None
 
 
 class Owner(commands.Cog):
