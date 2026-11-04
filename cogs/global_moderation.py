@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from config import APPROVED_GUILD_IDS, GLOBAL_ACTION_EXEMPT_GUILD_IDS
 from embeds import audit_reason, build_ban_dm_embed, build_dm_notice_embed, build_notice_embed, build_summary_embed
-from guards import from_approved_guild, has_tier, is_protected
+from guards import from_approved_guild, has_tier, highest_tier_anywhere, is_protected
 from modlog import record_case, try_dm
 from views import BanAppealView
 from views import ConfirmView, build_confirm_prompt
@@ -44,13 +44,27 @@ async def notify_global_ban(user: discord.User, reason: str) -> None:
 
 
 async def refuse_protected(ctx: commands.Context, user: discord.User) -> bool:
-    """Global actions bypass per-server role hierarchy entirely, so the protected list is the
-    only thing standing between a rogue global moderator and banning an owner everywhere."""
-    if not is_protected(user.id):
-        return False
-    await ctx.send(
-        embed=build_notice_embed(f"**{user}** is on the protected list and can't be moderated.", success=False)
-    )
+    """Global actions bypass per-server role hierarchy entirely, so this is the only
+    thing standing between a rogue global moderator and anyone they please.
+
+    Discord role position is meaningless across servers, so the tier ladder is the
+    comparison used here instead of the per-guild hierarchy check.
+    """
+    if user.id == ctx.author.id:
+        refusal = "You can't use that on yourself."
+    elif ctx.bot.user is not None and user.id == ctx.bot.user.id:
+        refusal = "You can't use that on me."
+    elif is_protected(user.id):
+        refusal = f"**{user}** is on the protected list and can't be moderated."
+    else:
+        actor_tier = highest_tier_anywhere(ctx.bot, ctx.author)
+        target_tier = highest_tier_anywhere(ctx.bot, user)
+        if target_tier is not None and actor_tier is not None and target_tier >= actor_tier:
+            refusal = "You can't take a global action against someone at your tier or above."
+        else:
+            return False
+
+    await ctx.send(embed=build_notice_embed(refusal, success=False))
     return True
 
 
@@ -144,6 +158,8 @@ class GlobalModeration(commands.Cog):
     @has_tier("management")
     @from_approved_guild()
     async def globalunban(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
+        if await refuse_protected(ctx, user):
+            return
         await ctx.defer()
         reason_text = audit_reason(ctx.author, "Global unban", reason)
 
@@ -194,6 +210,8 @@ class GlobalModeration(commands.Cog):
     @has_tier("management")
     @from_approved_guild()
     async def globalunmute(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
+        if await refuse_protected(ctx, user):
+            return
         await ctx.defer()
         reason_text = audit_reason(ctx.author, "Global unmute", reason)
 
