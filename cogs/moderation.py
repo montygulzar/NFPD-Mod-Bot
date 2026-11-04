@@ -51,11 +51,23 @@ class Moderation(commands.Cog):
         settings = await get_guild_settings(ctx.guild.id)
         reason = f"Automatic action after reaching {warn_count} warns"
 
-        if settings["warn_ban_threshold"] == warn_count:
+        # Thresholds are compared with >= rather than ==, so a crossing is not lost
+        # when the action is skipped. With ==, an escalation withheld by the guard
+        # below (or by an API failure) consumed its threshold permanently: warn
+        # counts past it never matched again, so the punishment was never applied
+        # even once the target could legitimately be actioned.
+        #
+        # setwarnthresholds enforces mute < kick < ban, so testing most severe
+        # first picks the highest threshold crossed. A falsy value means disabled.
+        ban_at = settings["warn_ban_threshold"]
+        kick_at = settings["warn_kick_threshold"]
+        mute_at = settings["warn_mute_threshold"]
+
+        if ban_at and warn_count >= ban_at:
             action_type = "ban"
-        elif settings["warn_kick_threshold"] == warn_count:
+        elif kick_at and warn_count >= kick_at:
             action_type = "kick"
-        elif settings["warn_mute_threshold"] == warn_count:
+        elif mute_at and warn_count >= mute_at:
             action_type = "mute"
         else:
             return
