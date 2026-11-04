@@ -134,6 +134,25 @@ def tier_label(index: int | None) -> str:
     return "No staff tier" if index is None else _TIER_LABELS[_TIERS[index]]
 
 
+def highest_tier_anywhere(bot, user: discord.abc.User) -> int | None:
+    """The highest tier this user holds in any guild the bot can see.
+
+    Global actions cross server boundaries, where Discord role position means
+    nothing, so tier is the only comparison that holds. Taking the highest tier
+    found anywhere is the cautious reading: a user who is Management in one NFPD
+    server is treated as Management for global actions everywhere.
+    """
+    best = member_tier_index(user)  # catches OWNER_IDS and the user-ID tiers
+    for guild in bot.guilds:
+        member = guild.get_member(user.id)
+        if member is None:
+            continue
+        tier = member_tier_index(member)
+        if tier is not None and (best is None or tier > best):
+            best = tier
+    return best
+
+
 def from_approved_guild():
     """Command check ensuring the command is run from an approved server.
 
@@ -178,10 +197,26 @@ def is_protected(user_id: int) -> bool:
 
 
 def outranks_or_equals(actor: discord.Member, target: discord.Member) -> bool:
-    """True when the target sits at or above the actor in the role hierarchy."""
+    """True when the target sits at or above the actor, by EITHER measure.
+
+    Discord role position and the bot's tier ladder are independent: a Moderator
+    whose role happens to sit high in the role list would otherwise be able to
+    action a Management member whose role sits low. Either measure placing the
+    target level with or above the actor is enough to refuse.
+    """
     if actor.id == actor.guild.owner_id:
         return False
-    return target.top_role >= actor.top_role
+
+    if target.top_role >= actor.top_role:
+        return True
+
+    target_tier = member_tier_index(target)
+    if target_tier is None:
+        return False  # No staff tier, so the role position above is the only say.
+    actor_tier = member_tier_index(actor)
+    if actor_tier is None:
+        return True
+    return target_tier >= actor_tier
 
 
 def refusal_reason(

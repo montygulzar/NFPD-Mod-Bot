@@ -236,6 +236,11 @@ class Moderation(commands.Cog):
     @has_tier("mod")
     @commands.bot_has_permissions(moderate_members=True)
     async def unmute(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
+        refusal = refusal_reason(ctx.author, member, self.bot.user.id)
+        if refusal:
+            await ctx.send(embed=build_notice_embed(refusal, success=False))
+            return
+
         if member.timed_out_until is None:
             await ctx.send(embed=build_notice_embed(f"{member.mention} isn't currently muted.", success=False))
             return
@@ -326,6 +331,11 @@ class Moderation(commands.Cog):
     @has_tier("mod")
     @commands.bot_has_permissions(manage_roles=True)
     async def unsuspend(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
+        refusal = refusal_reason(ctx.author, member, self.bot.user.id)
+        if refusal:
+            await ctx.send(embed=build_notice_embed(refusal, success=False))
+            return
+
         await ctx.defer()
 
         saved_role_ids = await get_suspended_member(ctx.guild.id, member.id)
