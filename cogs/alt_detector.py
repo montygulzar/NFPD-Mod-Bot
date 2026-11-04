@@ -258,6 +258,8 @@ class AltDetector(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
+        if member.bot:
+            return  # Bots are added deliberately; alt-scoring them is pure noise.
         invite_code, inviter = await self._find_used_invite(member.guild)
         score, factors = _score_member(member, inviter)
         embed = _build_embed(member, score, factors, invite_code, inviter)

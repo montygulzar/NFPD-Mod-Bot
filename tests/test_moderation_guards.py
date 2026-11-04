@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 import guards
+import cogs.moderation as mod   # imported before the fixture patches discord.Member
 from guards import outranks_or_equals, refusal_reason, highest_tier_anywhere
 
 BOT_ID = 999
@@ -112,3 +113,66 @@ def test_highest_tier_anywhere_finds_tier_in_another_guild():
 def test_highest_tier_anywhere_is_none_for_a_regular_user():
     plain = Member(8, 1, [])
     assert highest_tier_anywhere(Bot([Guild(members={8: plain})]), plain) is None
+
+
+# --- warn auto-escalation ----------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_warn_escalation_cannot_punish_someone_you_cannot_ban():
+    """/warn skips the hierarchy check so peers can be warned. The automatic
+    punishment must not become a way around that: warning a superior repeatedly
+    must not ban them."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    target = MagicMock()
+    target.mention = "@boss"
+    target.ban = AsyncMock()
+    target.kick = AsyncMock()
+    target.timeout = AsyncMock()
+
+    ctx = MagicMock()
+    ctx.guild.id = 1
+    ctx.send = AsyncMock()
+
+    bot = MagicMock()
+    bot.user.id = BOT_ID
+    cog = mod.Moderation(bot)
+
+    settings = {"warn_ban_threshold": 3, "warn_kick_threshold": None,
+                "warn_mute_threshold": None, "warn_mute_minutes": None}
+
+    with patch.object(mod, "get_guild_settings", AsyncMock(return_value=settings)), \
+         patch.object(mod, "refusal_reason",
+                      lambda *a, **k: "You can't action someone ranked equal to or above you."), \
+         patch.object(mod, "announce_case", AsyncMock()) as announced:
+        await cog.escalate_if_needed(ctx, target, 3)
+
+    target.ban.assert_not_called()
+    target.kick.assert_not_called()
+    target.timeout.assert_not_called()
+    announced.assert_not_called()
+    ctx.send.assert_awaited()          # the moderator is told why
+
+
+@pytest.mark.asyncio
+async def test_warn_escalation_still_fires_on_a_valid_target():
+    from unittest.mock import AsyncMock, MagicMock
+
+    target = MagicMock()
+    target.ban = AsyncMock()
+    ctx = MagicMock()
+    ctx.guild.id = 1
+    ctx.send = AsyncMock()
+    bot = MagicMock()
+    bot.user.id = BOT_ID
+    cog = mod.Moderation(bot)
+
+    settings = {"warn_ban_threshold": 3, "warn_kick_threshold": None,
+                "warn_mute_threshold": None, "warn_mute_minutes": None}
+
+    with patch.object(mod, "get_guild_settings", AsyncMock(return_value=settings)), \
+         patch.object(mod, "refusal_reason", lambda *a, **k: None), \
+         patch.object(mod, "announce_case", AsyncMock()):
+        await cog.escalate_if_needed(ctx, target, 3)
+
+    target.ban.assert_awaited_once()

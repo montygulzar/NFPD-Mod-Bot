@@ -60,6 +60,20 @@ class Moderation(commands.Cog):
         else:
             return
 
+        # /warn deliberately skips the hierarchy check so peers can be warned, but the
+        # automatic punishment must not become a way around it: without this, warning a
+        # superior repeatedly would ban them. The full check runs here instead.
+        refusal = refusal_reason(ctx.author, member, self.bot.user.id)
+        if refusal:
+            await ctx.send(
+                embed=build_notice_embed(
+                    f"{member.mention} reached the warn threshold for an automatic "
+                    f"{action_type}, but it was not applied: {refusal}",
+                    success=False,
+                )
+            )
+            return
+
         try:
             if action_type == "ban":
                 await member.ban(reason=reason)
@@ -165,6 +179,10 @@ class Moderation(commands.Cog):
     @has_tier("mod")
     @commands.bot_has_permissions(ban_members=True)
     async def unban(self, ctx: commands.Context, user: discord.User, *, reason: str = "No reason provided"):
+        if user.id == self.bot.user.id:
+            await ctx.send(embed=build_notice_embed("You can't use that on me.", success=False))
+            return
+
         await ctx.defer()
         try:
             await ctx.guild.unban(user, reason=audit_reason(ctx.author, "Unban", reason))
