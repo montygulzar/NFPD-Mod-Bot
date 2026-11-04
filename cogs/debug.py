@@ -277,7 +277,34 @@ class Debug(commands.Cog):
             value=clamp("\n".join(f"{WARN} {warning}" for warning in warnings), empty=f"{TICK} No issues found."),
             inline=False,
         )
+
+        # Named rather than counted: the whole point of this setting is being able
+        # to confirm at a glance that a specific server (the Appeals server) really
+        # is on it, which a bare count cannot tell you.
+        embed.add_field(
+            name=f"Global-action exempt servers ({len(config.GLOBAL_ACTION_EXEMPT_GUILD_IDS)})",
+            value=clamp(
+                "\n".join(self._describe_guilds(config.GLOBAL_ACTION_EXEMPT_GUILD_IDS)),
+                empty=f"{WARN} None. Global bans will reach every approved server.",
+            ),
+            inline=False,
+        )
         return embed
+
+    def _describe_guilds(self, guild_ids: set[int]) -> list[str]:
+        """One line per guild: its name where the bot is in it, the raw id where not."""
+        lines = []
+        for guild_id in sorted(guild_ids):
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                # Exempting a server the bot is not in has no effect, since global
+                # actions only ever touch servers it can see.
+                lines.append(f"{WARN} `{guild_id}` - not a server I'm in")
+            elif config.APPROVED_GUILD_IDS and guild_id not in config.APPROVED_GUILD_IDS:
+                lines.append(f"{WARN} {guild.name} (`{guild_id}`) - not approved either")
+            else:
+                lines.append(f"{TICK} {guild.name} (`{guild_id}`)")
+        return lines
 
     def _activity_embed(self) -> discord.Embed:
         embed = base_embed("Debug - Activity", NEUTRAL_COLOR)
