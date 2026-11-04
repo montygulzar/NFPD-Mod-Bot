@@ -141,11 +141,25 @@ async def test_warn_escalation_cannot_punish_someone_you_cannot_ban():
     settings = {"warn_ban_threshold": 3, "warn_kick_threshold": None,
                 "warn_mute_threshold": None, "warn_mute_minutes": None}
 
+    seen = {}
+
+    def spy(actor, tgt, bot_id, **kwargs):
+        seen.update(actor=actor, target=tgt, bot_id=bot_id, kwargs=kwargs)
+        return "You can't action someone ranked equal to or above you."
+
     with patch.object(mod, "get_guild_settings", AsyncMock(return_value=settings)), \
-         patch.object(mod, "refusal_reason",
-                      lambda *a, **k: "You can't action someone ranked equal to or above you."), \
+         patch.object(mod, "refusal_reason", spy), \
          patch.object(mod, "announce_case", AsyncMock()) as announced:
         await cog.escalate_if_needed(ctx, target, 3)
+
+    # The check must run against the real actor/target, with the hierarchy
+    # comparison ENABLED - that is the bypass being closed. Without these the
+    # test would still pass if the call inverted the pair or passed
+    # check_hierarchy=False, which is exactly the bug.
+    assert seen["actor"] is ctx.author
+    assert seen["target"] is target
+    assert seen["bot_id"] == BOT_ID
+    assert seen["kwargs"].get("check_hierarchy", True) is True
 
     target.ban.assert_not_called()
     target.kick.assert_not_called()
