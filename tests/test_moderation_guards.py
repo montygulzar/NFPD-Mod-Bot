@@ -282,55 +282,33 @@ def test_suspend_refuses_someone_above_you():
     assert refusal_reason(mod, boss, BOT_ID) is not None
 
 
-def test_suspend_allows_an_equal():
-    """Suspension is fully reversible by anyone via /unsuspend, so peers may
-    suspend each other. Ban, kick and mute keep the stricter check."""
-    a, b = Member(1, 5, [MOD_ROLE]), Member(2, 5, [MOD_ROLE])
-    assert refusal_reason(a, b, BOT_ID, allow_equal=True) is None
-
-
-def test_suspend_still_refuses_someone_above_even_with_allow_equal():
-    mod, boss = Member(1, 5, [MOD_ROLE]), Member(2, 9, [MGMT_ROLE])
-    assert refusal_reason(mod, boss, BOT_ID, allow_equal=True) is not None
-
-
-def test_allow_equal_still_refuses_a_higher_tier_at_equal_role_position():
-    """Equal on one measure must still lose to the other being above."""
-    mod_high = Member(1, 5, [MOD_ROLE])
-    mgmt_same_position = Member(2, 5, [MGMT_ROLE])
-    assert outranks_or_equals(mod_high, mgmt_same_position, allow_equal=True)
-
-
-def test_ban_and_kick_still_refuse_an_equal():
-    """allow_equal is opt-in; the irreversible actions must not inherit it."""
+def test_suspend_refuses_an_equal():
+    """Both suspend and unsuspend use the strict check: equal or above is refused."""
     a, b = Member(1, 5, [MOD_ROLE]), Member(2, 5, [MOD_ROLE])
     assert refusal_reason(a, b, BOT_ID) is not None
 
 
-def test_unsuspend_allows_someone_above_you():
-    """A suspended member cannot act for themselves, and the people most likely
-    to need lifting out of one are the ones who outrank whoever is on duty."""
+def test_suspend_refuses_someone_above():
+    mod, boss = Member(1, 5, [MOD_ROLE]), Member(2, 9, [MGMT_ROLE])
+    assert refusal_reason(mod, boss, BOT_ID) is not None
+
+
+def test_unsuspend_uses_the_same_strict_check_as_suspend():
+    """unsuspend shares refusal_reason, so a peer or a superior is refused for
+    both. A suspended member whose roles were stripped no longer outranks, which
+    is what still makes an ordinary suspension liftable."""
     mod = Member(1, 5, [MOD_ROLE])
-    boss = Member(2, 9, [MGMT_ROLE])
-    assert guards.restorative_refusal_reason(mod, boss, BOT_ID) is None
+    peer = Member(2, 5, [MOD_ROLE])
+    boss = Member(3, 9, [MGMT_ROLE])
+    stripped = Member(4, 0, [])          # suspended: roles gone, so ranks below
+    assert refusal_reason(mod, peer, BOT_ID) is not None
+    assert refusal_reason(mod, boss, BOT_ID) is not None
+    assert refusal_reason(mod, stripped, BOT_ID) is None
 
 
-def test_unsuspend_allows_an_equal():
-    a, b = Member(1, 5, [MOD_ROLE]), Member(2, 5, [MOD_ROLE])
-    assert guards.restorative_refusal_reason(a, b, BOT_ID) is None
-
-
-def test_unsuspend_still_refuses_self_and_the_bot():
-    mod = Member(1, 5, [MOD_ROLE])
-    assert guards.restorative_refusal_reason(mod, mod, BOT_ID) is not None
-    assert guards.restorative_refusal_reason(mod, Member(BOT_ID, 1), BOT_ID) is not None
-
-
-def test_unsuspend_works_even_for_a_protected_target():
-    """Protected users cannot be suspended, but a record predating that status
-    must still be liftable rather than stuck forever."""
-    mod = Member(1, 5, [MOD_ROLE])
-    with patch.object(guards, "PROTECTED_USER_IDS", {2}):
-        protected = Member(2, 1, [])
-        assert refusal_reason(mod, protected, BOT_ID) is not None       # punitive: no
-        assert guards.restorative_refusal_reason(mod, protected, BOT_ID) is None  # restorative: yes
+def test_no_command_opts_out_of_the_hierarchy_check_except_warn():
+    """check_hierarchy=False is warn's alone; nothing else may relax it."""
+    import inspect
+    import cogs.moderation as m
+    src = inspect.getsource(m)
+    assert src.count("check_hierarchy=False") == 1
