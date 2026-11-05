@@ -271,6 +271,19 @@ async def run() -> int:
             logger.critical("Database unavailable - cannot start", exc_info=True)
             return 1
 
+        # Mirror the stored protected list into memory before any command can run.
+        # is_protected is synchronous and cannot query, so an empty mirror would
+        # silently leave those users moderatable until something refreshed it.
+        try:
+            protected = await database.get_protected_user_ids()
+            guards.set_runtime_protected(protected)
+            logger.info("Loaded %d runtime-protected user(s)", len(protected))
+        except Exception:
+            logger.exception(
+                "Could not load the protected-user list - only PROTECTED_USER_IDS "
+                "and OWNER_IDS are in force this run"
+            )
+
         client = asyncio.create_task(bot.start(BOT_TOKEN), name="discord-client")
         signalled = asyncio.create_task(shutdown.wait(), name="shutdown-signal")
         done, _ = await asyncio.wait({client, signalled}, return_when=asyncio.FIRST_COMPLETED)

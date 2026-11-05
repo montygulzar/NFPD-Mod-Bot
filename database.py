@@ -136,6 +136,18 @@ SCHEMA_STATEMENTS = (
         PRIMARY KEY (guild_id, user_id)
     )
     """,
+    # Protected users added at runtime, on top of the immutable PROTECTED_USER_IDS
+    # from the environment. Deliberately not keyed by guild: is_protected answers
+    # for a user, not a user in a place, and protection is meant to hold wherever
+    # the bot can act on them.
+    """
+    CREATE TABLE IF NOT EXISTS protected_users (
+        user_id   BIGINT PRIMARY KEY,
+        added_by  BIGINT NOT NULL,
+        added_at  TEXT NOT NULL,
+        note      TEXT
+    )
+    """,
 )
 
 # Columns added after the first release. Applied with ADD COLUMN IF NOT EXISTS so an
@@ -762,3 +774,39 @@ async def remove_suspended_member(guild_id: int, user_id: int) -> None:
         guild_id, user_id,
         idempotent=True,
     )
+
+
+# --- Protected users ---------------------------------------------------------
+
+async def add_protected_user(user_id: int, added_by: int, note: str | None) -> bool:
+    """Returns False when the user was already on the list."""
+    changed = await _execute(
+        """
+        INSERT INTO protected_users (user_id, added_by, added_at, note)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (user_id) DO NOTHING
+        """,
+        user_id, added_by, datetime.now(timezone.utc).isoformat(), note,
+        idempotent=True,
+    )
+    return changed > 0
+
+
+async def remove_protected_user(user_id: int) -> bool:
+    changed = await _execute(
+        "DELETE FROM protected_users WHERE user_id = $1",
+        user_id,
+        idempotent=True,
+    )
+    return changed > 0
+
+
+async def get_protected_users() -> list[asyncpg.Record]:
+    return await _fetch_all(
+        "SELECT user_id, added_by, added_at, note FROM protected_users ORDER BY added_at"
+    )
+
+
+async def get_protected_user_ids() -> set[int]:
+    rows = await _fetch_all("SELECT user_id FROM protected_users")
+    return {row["user_id"] for row in rows}

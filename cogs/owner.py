@@ -4,7 +4,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+import config
+import guards
 from config import APPROVED_GUILD_IDS
+from database import (
+    add_protected_user,
+    get_protected_user_ids,
+    get_protected_users,
+    remove_protected_user,
+)
 from embeds import NEUTRAL_COLOR, audit_reason, base_embed, build_notice_embed, clamp
 from guards import has_tier
 from invites import resolve_invite
@@ -230,6 +238,101 @@ class Owner(commands.Cog):
             )
             embed.set_footer(text=f"Page {index}/{len(pages)}  •  ✅ you have it  ⛔ I can't assign it")
             await ctx.send(embed=embed)
+
+
+    # --- Protected users -------------------------------------------------------
+
+    @commands.hybrid_command(name="protect", description="Shield a user from every moderation action")
+    @app_commands.describe(user="The user to protect", note="Why, shown in /protectlist")
+    @has_tier("development")
+    async def protect(self, ctx: commands.Context, user: discord.User, *, note: str | None = None):
+        await ctx.defer()
+        if guards.is_protected(user.id):
+            await ctx.send(embed=build_notice_embed(
+                f"**{user}** is already protected.", success=False,
+            ))
+            return
+
+        added = await add_protected_user(user.id, ctx.author.id, note)
+        if not added:
+            await ctx.send(embed=build_notice_embed(
+                f"**{user}** is already protected.", success=False,
+            ))
+            return
+
+        guards.set_runtime_protected(await get_protected_user_ids())
+        logger.warning(
+            "PROTECT: %s (%s) protected %s (%s)",
+            ctx.author, ctx.author.id, user, user.id,
+        )
+        await ctx.send(embed=build_notice_embed(
+            f"**{user}** is now protected and can no longer be the target of any "
+            "moderation action, including global ones."
+        ))
+
+    @commands.hybrid_command(name="unprotect", description="Remove a user from the protected list")
+    @app_commands.describe(user="The user to stop protecting")
+    @has_tier("development")
+    async def unprotect(self, ctx: commands.Context, user: discord.User):
+        await ctx.defer()
+        removed = await remove_protected_user(user.id)
+        if not removed:
+            # Distinguish "not on the list at all" from "protected by configuration",
+            # which no command can undo.
+            if guards.is_protected(user.id):
+                await ctx.send(embed=build_notice_embed(
+                    f"**{user}** is protected by PROTECTED_USER_IDS or OWNER_IDS in the "
+                    "environment, not by `/protect`. Edit `.env` and restart to change that.",
+                    success=False,
+                ))
+            else:
+                await ctx.send(embed=build_notice_embed(
+                    f"**{user}** isn't on the protected list.", success=False,
+                ))
+            return
+
+        guards.set_runtime_protected(await get_protected_user_ids())
+        logger.warning(
+            "UNPROTECT: %s (%s) unprotected %s (%s)",
+            ctx.author, ctx.author.id, user, user.id,
+        )
+        await ctx.send(embed=build_notice_embed(f"**{user}** is no longer protected."))
+
+    @commands.hybrid_command(name="protectlist", description="Show every protected user")
+    @has_tier("development")
+    async def protectlist(self, ctx: commands.Context):
+        await ctx.defer()
+        rows = await get_protected_users()
+
+        embed = base_embed("Protected Users", NEUTRAL_COLOR)
+        embed.description = (
+            "Protected users can never be the target of a moderation action, "
+            "local or global."
+        )
+
+        # Configured entries are listed separately because /unprotect cannot touch
+        # them - without that distinction the command looks broken on those users.
+        configured = sorted(config.PROTECTED_USER_IDS | config.OWNER_IDS)
+        embed.add_field(
+            name=f"From the environment ({len(configured)})",
+            value=clamp(
+                "\n".join(f"<@{uid}> `{uid}`" for uid in configured),
+                empty="*None*",
+            ),
+            inline=False,
+        )
+
+        lines = []
+        for row in rows:
+            note = f" - {row['note']}" if row["note"] else ""
+            lines.append(f"<@{row['user_id']}> `{row['user_id']}`{note}")
+        embed.add_field(
+            name=f"Added with /protect ({len(rows)})",
+            value=clamp("\n".join(lines), empty="*None*"),
+            inline=False,
+        )
+        embed.set_footer(text="Environment entries need an .env change; the rest take /unprotect.")
+        await ctx.send(embed=embed)
 
 
 async def setup(bot: commands.Bot):
