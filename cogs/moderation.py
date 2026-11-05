@@ -296,7 +296,10 @@ class Moderation(commands.Cog):
     @has_tier("mod")
     @commands.bot_has_permissions(manage_roles=True)
     async def suspend(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
-        refusal = refusal_reason(ctx.author, member, self.bot.user.id)
+        # allow_equal: peers may suspend each other, but nobody above them. Suspension
+        # is fully reversible by anyone via /unsuspend, so a peer acting in error is
+        # recoverable in a way a ban or kick is not - those keep the stricter check.
+        refusal = refusal_reason(ctx.author, member, self.bot.user.id, allow_equal=True)
         if refusal:
             await ctx.send(embed=build_notice_embed(refusal, success=False))
             return

@@ -21,6 +21,8 @@ class Role:
         self.position, self.id = position, id
     def __ge__(self, other):
         return self.position >= other.position
+    def __gt__(self, other):
+        return self.position > other.position
 
 
 class Guild:
@@ -280,7 +282,27 @@ def test_suspend_refuses_someone_above_you():
     assert refusal_reason(mod, boss, BOT_ID) is not None
 
 
-def test_suspend_refuses_an_equal():
+def test_suspend_allows_an_equal():
+    """Suspension is fully reversible by anyone via /unsuspend, so peers may
+    suspend each other. Ban, kick and mute keep the stricter check."""
+    a, b = Member(1, 5, [MOD_ROLE]), Member(2, 5, [MOD_ROLE])
+    assert refusal_reason(a, b, BOT_ID, allow_equal=True) is None
+
+
+def test_suspend_still_refuses_someone_above_even_with_allow_equal():
+    mod, boss = Member(1, 5, [MOD_ROLE]), Member(2, 9, [MGMT_ROLE])
+    assert refusal_reason(mod, boss, BOT_ID, allow_equal=True) is not None
+
+
+def test_allow_equal_still_refuses_a_higher_tier_at_equal_role_position():
+    """Equal on one measure must still lose to the other being above."""
+    mod_high = Member(1, 5, [MOD_ROLE])
+    mgmt_same_position = Member(2, 5, [MGMT_ROLE])
+    assert outranks_or_equals(mod_high, mgmt_same_position, allow_equal=True)
+
+
+def test_ban_and_kick_still_refuse_an_equal():
+    """allow_equal is opt-in; the irreversible actions must not inherit it."""
     a, b = Member(1, 5, [MOD_ROLE]), Member(2, 5, [MOD_ROLE])
     assert refusal_reason(a, b, BOT_ID) is not None
 
