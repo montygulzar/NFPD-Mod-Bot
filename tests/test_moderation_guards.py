@@ -360,3 +360,64 @@ def test_chief_rank_can_only_suspend_below():
         assert refusal_reason(cr, Member(4, 1, []), BOT_ID) is None               # no tier
         assert refusal_reason(cr, Member(5, 7, [CR_ROLE]), BOT_ID) is not None    # peer
         assert refusal_reason(cr, Member(6, 8, [MGMT_ROLE]), BOT_ID) is not None  # above
+
+
+# --- the remembered rank -----------------------------------------------------
+
+def test_tier_for_role_ids_reads_rank_from_roles_no_longer_held():
+    ladder = {"mod": {MOD_ROLE}, "ban_perm": set(), "cr": set(),
+              "management": {MGMT_ROLE}, "ownership": set()}
+    with patch.object(guards, "_TIER_ROLE_IDS", ladder):
+        assert guards.tier_for_role_ids([MGMT_ROLE]) == guards.tier_index("management")
+        assert guards.tier_for_role_ids([MOD_ROLE]) == guards.tier_index("mod")
+        # Highest wins when several are held.
+        assert guards.tier_for_role_ids([MOD_ROLE, MGMT_ROLE]) == guards.tier_index("management")
+        assert guards.tier_for_role_ids([]) is None
+        assert guards.tier_for_role_ids([99999]) is None
+
+
+@pytest.mark.asyncio
+async def test_unsuspend_judges_the_rank_held_when_suspended():
+    """Suspending strips every role, so the live member outranks nobody and the
+    ordinary hierarchy check passes for anyone. Without the remembered rank, a
+    Chief Rank could undo a suspension only Ownership should be able to lift."""
+    from unittest.mock import AsyncMock, MagicMock
+    import cogs.moderation as m
+
+    CR_ROLE, OWNERSHIP_ROLE = 30, 50
+    ladder = {"mod": {MOD_ROLE}, "ban_perm": set(), "cr": {CR_ROLE},
+              "management": {MGMT_ROLE}, "ownership": {OWNERSHIP_ROLE}}
+
+    async def attempt(actor_role, remembered_tier):
+        actor = Member(1, 7, [actor_role])
+        target = Member(777, 0, [])           # stripped by the suspension
+        target.mention = "<@777>"
+        ctx = MagicMock()
+        ctx.author, ctx.send, ctx.defer = actor, AsyncMock(), AsyncMock()
+        ctx.guild.id = 1
+        ctx.guild.me.top_role = Role(99)
+        ctx.guild.get_role.return_value = None
+        bot = MagicMock(); bot.user.id = BOT_ID
+        cog = m.Moderation(bot)
+        record = {"role_ids": [], "tier_index": remembered_tier}
+        with patch.object(m, "get_suspended_member", AsyncMock(return_value=record)), \
+             patch.object(m, "get_guild_settings",
+                          AsyncMock(return_value={"suspended_role_id": None})), \
+             patch.object(m, "remove_suspended_member", AsyncMock()) as cleared, \
+             patch.object(m, "record_case", AsyncMock(return_value=MagicMock())), \
+             patch.object(guards, "_TIER_ROLE_IDS", ladder), \
+             patch.object(guards, "OWNER_IDS", set()), \
+             patch.object(guards.discord, "Member", Member):
+            await cog.unsuspend.callback(cog, ctx, target, reason="t")
+        return cleared.called
+
+    mgmt_tier = guards.tier_index("management")
+    mod_tier = guards.tier_index("mod")
+
+    # A Management suspension needs someone above Management.
+    assert not await attempt(CR_ROLE, mgmt_tier)
+    assert not await attempt(MGMT_ROLE, mgmt_tier)
+    assert await attempt(OWNERSHIP_ROLE, mgmt_tier)
+
+    # A Moderator suspension is liftable by any tier that can run the command.
+    assert await attempt(CR_ROLE, mod_tier)

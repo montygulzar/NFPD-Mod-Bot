@@ -133,6 +133,7 @@ SCHEMA_STATEMENTS = (
         user_id       BIGINT NOT NULL,
         role_ids      TEXT NOT NULL,
         suspended_at  TEXT NOT NULL,
+        tier_index    INTEGER,
         PRIMARY KEY (guild_id, user_id)
     )
     """,
@@ -161,6 +162,9 @@ MIGRATION_STATEMENTS = (
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_kick_threshold   INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS warn_ban_threshold    INTEGER",
     "ALTER TABLE guild_settings ADD COLUMN IF NOT EXISTS suspended_role_id     BIGINT",
+    # Suspending strips every role, erasing the rank the member held. Without this
+    # the hierarchy check at unsuspend time sees someone who outranks nobody.
+    "ALTER TABLE suspended_members ADD COLUMN IF NOT EXISTS tier_index INTEGER",
 )
 
 
@@ -741,31 +745,41 @@ async def get_active_temp_ban_count() -> int:
 
 # --- Suspended members -------------------------------------------------------
 
-async def save_suspended_member(guild_id: int, user_id: int, role_ids: list[int]) -> None:
+async def save_suspended_member(
+    guild_id: int, user_id: int, role_ids: list[int], tier_index: int | None
+) -> None:
     await _execute(
         """
-        INSERT INTO suspended_members (guild_id, user_id, role_ids, suspended_at)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO suspended_members (guild_id, user_id, role_ids, suspended_at, tier_index)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (guild_id, user_id) DO UPDATE
-            SET role_ids = EXCLUDED.role_ids, suspended_at = EXCLUDED.suspended_at
+            SET role_ids = EXCLUDED.role_ids,
+                suspended_at = EXCLUDED.suspended_at,
+                tier_index = EXCLUDED.tier_index
         """,
         guild_id, user_id, json.dumps(role_ids),
-        datetime.now(timezone.utc).isoformat(),
+        datetime.now(timezone.utc).isoformat(), tier_index,
         idempotent=True,
     )
 
 
-async def get_suspended_member(guild_id: int, user_id: int) -> list[int] | None:
+async def get_suspended_member(guild_id: int, user_id: int) -> dict | None:
+    """{"role_ids": [...], "tier_index": int | None}, or None if not suspended.
+
+    tier_index is None on rows written before it was recorded; the caller falls
+    back to deriving the tier from the saved roles.
+    """
     row = await _fetch_one(
-        "SELECT role_ids FROM suspended_members WHERE guild_id = $1 AND user_id = $2",
+        "SELECT role_ids, tier_index FROM suspended_members WHERE guild_id = $1 AND user_id = $2",
         guild_id, user_id,
     )
     if row is None:
         return None
     try:
-        return json.loads(row["role_ids"])
+        role_ids = json.loads(row["role_ids"])
     except (json.JSONDecodeError, ValueError):
-        return []
+        role_ids = []
+    return {"role_ids": role_ids, "tier_index": row["tier_index"]}
 
 
 async def remove_suspended_member(guild_id: int, user_id: int) -> None:

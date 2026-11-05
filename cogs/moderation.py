@@ -14,7 +14,13 @@ from database import (
     save_suspended_member,
 )
 from embeds import audit_reason, build_ban_dm_embed, build_dm_notice_embed, build_notice_embed, clamp
-from guards import has_tier, refusal_reason
+from guards import (
+    has_tier,
+    member_tier_index,
+    refusal_reason,
+    tier_for_role_ids,
+    tier_label,
+)
 from modlog import announce_case, record_case, try_dm
 from views import BanAppealView
 
@@ -334,7 +340,12 @@ class Moderation(commands.Cog):
             and r != suspended_role
         ]
 
-        await save_suspended_member(ctx.guild.id, member.id, [r.id for r in removable])
+        # Captured before the roles come off: afterwards the member outranks
+        # nobody, so unsuspend would have nothing to judge against.
+        tier_at_suspension = member_tier_index(member)
+        await save_suspended_member(
+            ctx.guild.id, member.id, [r.id for r in removable], tier_at_suspension
+        )
 
         try:
             await member.add_roles(suspended_role, reason=audit_reason(ctx.author, "Suspend", reason))
@@ -368,10 +379,26 @@ class Moderation(commands.Cog):
 
         await ctx.defer()
 
-        saved_role_ids = await get_suspended_member(ctx.guild.id, member.id)
-        if saved_role_ids is None:
+        record = await get_suspended_member(ctx.guild.id, member.id)
+        if record is None:
             await ctx.send(embed=build_notice_embed(
                 f"{member.mention} is not currently suspended.", success=False,
+            ))
+            return
+        saved_role_ids = record["role_ids"]
+
+        # The live member outranks nobody, so the ordinary hierarchy check above
+        # passes for anyone. Judge against the rank they held when suspended, so
+        # lifting one still needs someone who outranked them at the time.
+        held_tier = record["tier_index"]
+        if held_tier is None:
+            held_tier = tier_for_role_ids(saved_role_ids)
+        actor_tier = member_tier_index(ctx.author)
+        if held_tier is not None and actor_tier is not None and held_tier >= actor_tier:
+            await ctx.send(embed=build_notice_embed(
+                f"{member.mention} was **{tier_label(held_tier)}** when they were "
+                "suspended, so only someone above that can unsuspend them.",
+                success=False,
             ))
             return
 

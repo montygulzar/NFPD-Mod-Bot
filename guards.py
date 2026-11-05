@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 import discord
 from discord.ext import commands
 
@@ -102,6 +104,20 @@ def member_tier_index(user: discord.abc.User) -> int | None:
         if tier in _TIER_USER_IDS and user.id in _TIER_USER_IDS[tier]:
             return index
         if tier in _TIER_ROLE_IDS and role_ids & _TIER_ROLE_IDS[tier]:
+            return index
+    return None
+
+
+def tier_for_role_ids(role_ids: Iterable[int]) -> int | None:
+    """Highest tier granted by these role IDs, or None if they grant no tier.
+
+    Lets a rank be judged from roles the member no longer holds - a suspended
+    member has had theirs stripped, so their live roles say nothing about the
+    rank they are being restored to.
+    """
+    held = set(role_ids)
+    for index in range(len(_TIERS) - 1, -1, -1):
+        if held & _TIER_ROLE_IDS.get(_TIERS[index], set()):
             return index
     return None
 
