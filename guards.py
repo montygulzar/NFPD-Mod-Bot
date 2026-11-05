@@ -187,13 +187,37 @@ def is_blocked(user_id: int) -> bool:
     return user_id in BLOCKED_USER_IDS
 
 
+# Protected users added through /protect, mirrored in memory because is_protected
+# is synchronous and sits on the hot path of every moderation command - it cannot
+# await a query. Loaded once at startup and rewritten by the commands that change
+# it, so the database stays the record and this stays the lookup.
+_runtime_protected: set[int] = set()
+
+
+def set_runtime_protected(user_ids: set[int]) -> None:
+    """Replace the in-memory mirror of the database-backed protected list."""
+    global _runtime_protected
+    _runtime_protected = set(user_ids)
+
+
+def runtime_protected_ids() -> set[int]:
+    return set(_runtime_protected)
+
+
 def is_protected(user_id: int) -> bool:
     """Users who can never be the target of a moderation action.
 
     Owners are always included on top of PROTECTED_USER_IDS, so a moderator whose account
     is compromised still can't ban the people who administer the bot.
+
+    The runtime list adds to those two rather than replacing them: a user protected
+    by the environment cannot be unprotected by a command.
     """
-    return user_id in PROTECTED_USER_IDS or user_id in OWNER_IDS
+    return (
+        user_id in PROTECTED_USER_IDS
+        or user_id in OWNER_IDS
+        or user_id in _runtime_protected
+    )
 
 
 def outranks_or_equals(actor: discord.Member, target: discord.Member) -> bool:
