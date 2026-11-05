@@ -555,11 +555,32 @@ DEFAULT_SETTINGS: dict = {
 _SETTINGS_COLUMNS = frozenset(DEFAULT_SETTINGS)
 
 
+# Guild settings are read on nearly every logged event - a message edit, a voice
+# move - so querying each time put a row fetch in front of traffic that happens
+# constantly. The row changes only through the setters below, which drop their
+# guild's entry, so the cache cannot go stale under this process. It is per
+# process: a second bot container would not see the first one's writes until its
+# own entry is dropped, which is why the setters invalidate rather than update.
+_settings_cache: dict[int, dict] = {}
+
+
+def _invalidate_settings(guild_id: int) -> None:
+    _settings_cache.pop(guild_id, None)
+
+
+def clear_settings_cache() -> None:
+    _settings_cache.clear()
+
+
 async def get_guild_settings(guild_id: int) -> dict:
+    cached = _settings_cache.get(guild_id)
+    if cached is not None:
+        return dict(cached)  # copied so a caller cannot mutate the cached row
+
     row = await _fetch_one("SELECT * FROM guild_settings WHERE guild_id = $1", guild_id)
-    if row is None:
-        return {"guild_id": guild_id, **DEFAULT_SETTINGS}
-    return dict(row)
+    settings = {"guild_id": guild_id, **DEFAULT_SETTINGS} if row is None else dict(row)
+    _settings_cache[guild_id] = settings
+    return dict(settings)
 
 
 async def _upsert_settings(guild_id: int, column: str, value) -> None:
@@ -574,6 +595,7 @@ async def _upsert_settings(guild_id: int, column: str, value) -> None:
         guild_id, value,
         idempotent=True,
     )
+    _invalidate_settings(guild_id)
 
 
 async def set_log_channel(guild_id: int, channel_id: int) -> None:
@@ -621,6 +643,7 @@ async def set_warn_thresholds(
         guild_id, mute_threshold, mute_minutes, kick_threshold, ban_threshold,
         idempotent=True,
     )
+    _invalidate_settings(guild_id)
 
 
 # --- Lockdown roles ----------------------------------------------------------

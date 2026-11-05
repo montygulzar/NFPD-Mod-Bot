@@ -19,6 +19,7 @@ from discord.ext import commands
 
 import embeds as embeds_module
 from config import BRAND_NAME, LOG_IGNORED_USER_IDS
+from database import get_guild_settings
 from modlog import post_to_server_log_channel
 
 # --- Colour palette -----------------------------------------------------------
@@ -71,6 +72,18 @@ def _short(text: str | None, limit: int = 1024) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
+
+
+async def _logging_off(guild: discord.Guild) -> bool:
+    """True when this guild has nowhere to post server events.
+
+    Checked before any audit-log lookup. Those lookups are the expensive part of
+    every handler, and post_to_server_log_channel only discovers there is no
+    channel after they have already been spent - which on a busy guild with no
+    server log is a steady stream of API calls for nothing.
+    """
+    settings = await get_guild_settings(guild.id)
+    return not (settings.get("server_log_channel_id") or settings.get("log_channel_id"))
 
 
 def _ignored(*users: discord.abc.User | discord.Member | None) -> bool:
@@ -152,6 +165,8 @@ class ServerLogs(commands.Cog):
     async def on_message_delete(self, message: discord.Message) -> None:
         if message.guild is None or message.author.bot or _ignored(message.author):
             return
+        if await _logging_off(message.guild):
+            return
 
         _, moderator = await _get_audit_entry(
             message.guild, message.author.id, discord.AuditLogAction.message_delete,
@@ -182,6 +197,8 @@ class ServerLogs(commands.Cog):
         if not messages or messages[0].guild is None:
             return
         guild = messages[0].guild
+        if await _logging_off(guild):
+            return
         non_bot = [m for m in messages if not m.author.bot]
         _, moderator = await _get_audit_entry(
             guild, messages[0].channel.id, discord.AuditLogAction.message_bulk_delete,
@@ -202,6 +219,8 @@ class ServerLogs(commands.Cog):
             return
         if before.content == after.content:
             return
+        if await _logging_off(before.guild):
+            return
 
         embed = _embed(icon="✏️", label="Message Edited", color=COLOR_EDIT)
         embed.add_field(name="Author", value=f"{before.author.mention} `{before.author.id}`", inline=True)
@@ -215,7 +234,7 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
-        if _ignored(member):
+        if _ignored(member) or await _logging_off(member.guild):
             return
         age = discord.utils.utcnow() - member.created_at
         age_days = age.days
@@ -237,7 +256,7 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
-        if _ignored(member):
+        if _ignored(member) or await _logging_off(member.guild):
             return
         guild = member.guild
 
@@ -262,7 +281,7 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User) -> None:
-        if _ignored(user):
+        if _ignored(user) or await _logging_off(guild):
             return
         reason, moderator = await _get_audit_entry(guild, user.id, discord.AuditLogAction.ban)
         embed = _user_embed(icon="\U0001F6D1", label="Member Banned", color=COLOR_BAN, user=user)
@@ -274,7 +293,7 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User) -> None:
-        if _ignored(user):
+        if _ignored(user) or await _logging_off(guild):
             return
         reason, moderator = await _get_audit_entry(guild, user.id, discord.AuditLogAction.unban)
         embed = _user_embed(icon="\U0001F513", label="Member Unbanned", color=COLOR_UNBAN, user=user)
@@ -286,9 +305,24 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        if _ignored(after):
+        if _ignored(after) or await _logging_off(before.guild):
             return
         guild = before.guild
+
+        # A single member_update entry covers both the timeout and the nickname
+        # change, so it is fetched at most once per event instead of once per
+        # branch. Role changes use a different audit action and keep their own.
+        _member_update_actor: discord.abc.User | None = None
+        _member_update_fetched = False
+
+        async def member_update_actor() -> discord.abc.User | None:
+            nonlocal _member_update_actor, _member_update_fetched
+            if not _member_update_fetched:
+                _, _member_update_actor = await _get_audit_entry(
+                    guild, after.id, discord.AuditLogAction.member_update
+                )
+                _member_update_fetched = True
+            return _member_update_actor
 
         # --- Timeout changes --------------------------------------------------
         now = discord.utils.utcnow()
@@ -296,7 +330,7 @@ class ServerLogs(commands.Cog):
         is_timed_out = after.timed_out_until is not None and after.timed_out_until > now
 
         if not was_timed_out and is_timed_out:
-            _, moderator = await _get_audit_entry(guild, after.id, discord.AuditLogAction.member_update)
+            moderator = await member_update_actor()
             embed = _user_embed(icon="⏰", label="Member Timed Out", color=COLOR_TIMEOUT, user=after)
             if moderator:
                 embed.add_field(name="Timed out by", value=moderator.mention, inline=True)
@@ -308,7 +342,7 @@ class ServerLogs(commands.Cog):
             await post_to_server_log_channel(guild, embed)
 
         elif was_timed_out and not is_timed_out:
-            _, moderator = await _get_audit_entry(guild, after.id, discord.AuditLogAction.member_update)
+            moderator = await member_update_actor()
             embed = _user_embed(icon="⏰", label="Timeout Removed", color=COLOR_UNBAN, user=after)
             if moderator and moderator.id != after.id:
                 embed.add_field(name="Removed by", value=moderator.mention, inline=True)
@@ -316,7 +350,7 @@ class ServerLogs(commands.Cog):
 
         # --- Nickname changes -------------------------------------------------
         if before.nick != after.nick:
-            _, moderator = await _get_audit_entry(guild, after.id, discord.AuditLogAction.member_update)
+            moderator = await member_update_actor()
             embed = _user_embed(
                 icon="\U0001F3F7️", label="Nickname Changed", color=COLOR_NICKNAME, user=after,
             )
@@ -351,7 +385,7 @@ class ServerLogs(commands.Cog):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ) -> None:
-        if _ignored(member):
+        if _ignored(member) or await _logging_off(member.guild):
             return
         guild = member.guild
 
@@ -428,6 +462,8 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel) -> None:
+        if await _logging_off(channel.guild):
+            return
         _, moderator = await _get_audit_entry(channel.guild, channel.id, discord.AuditLogAction.channel_create)
         if _ignored(moderator):
             return
@@ -442,6 +478,8 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel) -> None:
+        if await _logging_off(channel.guild):
+            return
         _, moderator = await _get_audit_entry(channel.guild, channel.id, discord.AuditLogAction.channel_delete)
         if _ignored(moderator):
             return
@@ -461,6 +499,8 @@ class ServerLogs(commands.Cog):
         before: discord.abc.GuildChannel,
         after: discord.abc.GuildChannel,
     ) -> None:
+        if await _logging_off(after.guild):
+            return
         changes: list[tuple[str, str, str]] = []
         if before.name != after.name:
             changes.append(("Name", f"`{before.name}`", f"`{after.name}`"))
@@ -491,6 +531,8 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_role_create(self, role: discord.Role) -> None:
+        if await _logging_off(role.guild):
+            return
         _, moderator = await _get_audit_entry(role.guild, role.id, discord.AuditLogAction.role_create)
         if _ignored(moderator):
             return
@@ -504,6 +546,8 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role) -> None:
+        if await _logging_off(role.guild):
+            return
         _, moderator = await _get_audit_entry(role.guild, role.id, discord.AuditLogAction.role_delete)
         if _ignored(moderator):
             return
@@ -517,6 +561,8 @@ class ServerLogs(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role) -> None:
+        if await _logging_off(after.guild):
+            return
         changes: list[tuple[str, str, str]] = []
         if before.name != after.name:
             changes.append(("Name", before.name, after.name))
@@ -546,6 +592,8 @@ class ServerLogs(commands.Cog):
     async def on_invite_create(self, invite: discord.Invite) -> None:
         if invite.guild is None or _ignored(invite.inviter):
             return
+        if await _logging_off(invite.guild):
+            return
         embed = _embed(icon="\U0001F517", label="Invite Created", color=COLOR_INVITE)
         embed.add_field(name="Code", value=f"[{invite.code}]({invite.url})", inline=True)
         if invite.inviter:
@@ -569,6 +617,8 @@ class ServerLogs(commands.Cog):
     @commands.Cog.listener()
     async def on_invite_delete(self, invite: discord.Invite) -> None:
         if invite.guild is None:
+            return
+        if await _logging_off(invite.guild):
             return
         embed = _embed(icon="\U0001F517", label="Invite Deleted", color=COLOR_DELETE)
         embed.add_field(name="Code", value=f"`{invite.code}`", inline=True)
