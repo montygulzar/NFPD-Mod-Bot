@@ -312,3 +312,51 @@ def test_no_command_opts_out_of_the_hierarchy_check_except_warn():
     import cogs.moderation as m
     src = inspect.getsource(m)
     assert src.count("check_hierarchy=False") == 1
+
+
+# --- /suspend is gated at Chief Rank ------------------------------------------
+
+@pytest.mark.asyncio
+async def test_suspend_requires_chief_rank_or_above():
+    """Pins the gate: Moderator and Ban Perm cannot reach /suspend at all."""
+    from discord.ext import commands as dcommands
+
+    async def _dummy(): ...
+    predicate = guards.has_tier("cr")(_dummy).__commands_checks__[0]
+
+    BAN_PERM_ROLE, CR_ROLE, OWNERSHIP_ROLE = 20, 30, 50
+    ladder = {"mod": {MOD_ROLE}, "ban_perm": {BAN_PERM_ROLE}, "cr": {CR_ROLE},
+              "management": {MGMT_ROLE}, "ownership": {OWNERSHIP_ROLE}}
+
+    class Ctx:
+        def __init__(self, member):
+            self.author, self.guild = member, member.guild
+
+    expected = {
+        MOD_ROLE: False, BAN_PERM_ROLE: False,
+        CR_ROLE: True, MGMT_ROLE: True, OWNERSHIP_ROLE: True,
+    }
+    with patch.object(guards, "_TIER_ROLE_IDS", ladder), \
+         patch.object(guards, "OWNER_IDS", set()):
+        for role_id, may_run in expected.items():
+            ctx = Ctx(Member(1, 5, [role_id]))
+            try:
+                got = await predicate(ctx)
+            except dcommands.CheckFailure:
+                got = False
+            assert got is may_run, f"role {role_id} should {'pass' if may_run else 'fail'}"
+
+
+def test_chief_rank_can_only_suspend_below():
+    """A Chief Rank reaches Moderator and below, never a peer or above."""
+    BAN_PERM_ROLE, CR_ROLE = 20, 30
+    ladder = {"mod": {MOD_ROLE}, "ban_perm": {BAN_PERM_ROLE}, "cr": {CR_ROLE},
+              "management": {MGMT_ROLE}, "ownership": set()}
+    with patch.object(guards, "_TIER_ROLE_IDS", ladder), \
+         patch.object(guards, "OWNER_IDS", set()):
+        cr = Member(1, 7, [CR_ROLE])
+        assert refusal_reason(cr, Member(2, 5, [MOD_ROLE]), BOT_ID) is None       # below
+        assert refusal_reason(cr, Member(3, 6, [BAN_PERM_ROLE]), BOT_ID) is None  # below
+        assert refusal_reason(cr, Member(4, 1, []), BOT_ID) is None               # no tier
+        assert refusal_reason(cr, Member(5, 7, [CR_ROLE]), BOT_ID) is not None    # peer
+        assert refusal_reason(cr, Member(6, 8, [MGMT_ROLE]), BOT_ID) is not None  # above
