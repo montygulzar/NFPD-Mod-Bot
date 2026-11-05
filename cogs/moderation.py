@@ -293,7 +293,7 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="suspend", description="Remove all roles and assign the suspended role")
     @app_commands.describe(member="The member to suspend", reason="Why they're being suspended")
     @commands.guild_only()
-    @has_tier("mod")
+    @has_tier("cr")
     @commands.bot_has_permissions(manage_roles=True)
     async def suspend(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
         refusal = refusal_reason(ctx.author, member, self.bot.user.id)
@@ -358,7 +358,7 @@ class Moderation(commands.Cog):
     @commands.hybrid_command(name="unsuspend", description="Restore a suspended member's roles")
     @app_commands.describe(member="The member to unsuspend", reason="Why they're being unsuspended")
     @commands.guild_only()
-    @has_tier("mod")
+    @has_tier("cr")
     @commands.bot_has_permissions(manage_roles=True)
     async def unsuspend(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
         refusal = refusal_reason(ctx.author, member, self.bot.user.id)
