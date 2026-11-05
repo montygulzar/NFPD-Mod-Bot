@@ -270,3 +270,45 @@ async def test_disabled_thresholds_never_escalate():
     target.ban.assert_not_called()
     target.kick.assert_not_called()
     target.timeout.assert_not_called()
+
+
+# --- suspend is punitive, unsuspend is restorative ---------------------------
+
+def test_suspend_refuses_someone_above_you():
+    mod = Member(1, 5, [MOD_ROLE])
+    boss = Member(2, 9, [MGMT_ROLE])
+    assert refusal_reason(mod, boss, BOT_ID) is not None
+
+
+def test_suspend_refuses_an_equal():
+    a, b = Member(1, 5, [MOD_ROLE]), Member(2, 5, [MOD_ROLE])
+    assert refusal_reason(a, b, BOT_ID) is not None
+
+
+def test_unsuspend_allows_someone_above_you():
+    """A suspended member cannot act for themselves, and the people most likely
+    to need lifting out of one are the ones who outrank whoever is on duty."""
+    mod = Member(1, 5, [MOD_ROLE])
+    boss = Member(2, 9, [MGMT_ROLE])
+    assert guards.restorative_refusal_reason(mod, boss, BOT_ID) is None
+
+
+def test_unsuspend_allows_an_equal():
+    a, b = Member(1, 5, [MOD_ROLE]), Member(2, 5, [MOD_ROLE])
+    assert guards.restorative_refusal_reason(a, b, BOT_ID) is None
+
+
+def test_unsuspend_still_refuses_self_and_the_bot():
+    mod = Member(1, 5, [MOD_ROLE])
+    assert guards.restorative_refusal_reason(mod, mod, BOT_ID) is not None
+    assert guards.restorative_refusal_reason(mod, Member(BOT_ID, 1), BOT_ID) is not None
+
+
+def test_unsuspend_works_even_for_a_protected_target():
+    """Protected users cannot be suspended, but a record predating that status
+    must still be liftable rather than stuck forever."""
+    mod = Member(1, 5, [MOD_ROLE])
+    with patch.object(guards, "PROTECTED_USER_IDS", {2}):
+        protected = Member(2, 1, [])
+        assert refusal_reason(mod, protected, BOT_ID) is not None       # punitive: no
+        assert guards.restorative_refusal_reason(mod, protected, BOT_ID) is None  # restorative: yes

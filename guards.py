@@ -219,6 +219,30 @@ def outranks_or_equals(actor: discord.Member, target: discord.Member) -> bool:
     return target_tier >= actor_tier
 
 
+def restorative_refusal_reason(
+    actor: discord.abc.User,
+    target: discord.abc.User,
+    bot_user_id: int,
+) -> str | None:
+    """Why a *restorative* action against this target must not proceed.
+
+    Giving something back is not a punishment, so rank is deliberately not
+    consulted here. A suspended member has had their roles stripped, so they
+    cannot act for themselves, and the people most likely to need lifting out of
+    it are the ones who outrank whoever is on duty. Refusing on hierarchy would
+    leave a suspended Management member with nobody able to restore them.
+
+    Self is still refused: a suspended moderator who kept their tier through a
+    user-ID list would otherwise be able to undo their own suspension. !bypass
+    exists for deliberate self-recovery.
+    """
+    if target.id == actor.id:
+        return "You can't use that on yourself."
+    if target.id == bot_user_id:
+        return "You can't use that on me."
+    return None
+
+
 def refusal_reason(
     actor: discord.Member,
     target: discord.abc.User,
