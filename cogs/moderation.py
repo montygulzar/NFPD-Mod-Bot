@@ -14,7 +14,7 @@ from database import (
     save_suspended_member,
 )
 from embeds import audit_reason, build_ban_dm_embed, build_dm_notice_embed, build_notice_embed, clamp
-from guards import has_tier, refusal_reason, restorative_refusal_reason
+from guards import has_tier, refusal_reason
 from modlog import announce_case, record_case, try_dm
 from views import BanAppealView
 
@@ -296,10 +296,7 @@ class Moderation(commands.Cog):
     @has_tier("mod")
     @commands.bot_has_permissions(manage_roles=True)
     async def suspend(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
-        # allow_equal: peers may suspend each other, but nobody above them. Suspension
-        # is fully reversible by anyone via /unsuspend, so a peer acting in error is
-        # recoverable in a way a ban or kick is not - those keep the stricter check.
-        refusal = refusal_reason(ctx.author, member, self.bot.user.id, allow_equal=True)
+        refusal = refusal_reason(ctx.author, member, self.bot.user.id)
         if refusal:
             await ctx.send(embed=build_notice_embed(refusal, success=False))
             return
@@ -364,10 +361,7 @@ class Moderation(commands.Cog):
     @has_tier("mod")
     @commands.bot_has_permissions(manage_roles=True)
     async def unsuspend(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
-        # Restorative, so rank is not consulted: a suspended member has no roles
-        # left and cannot act for themselves, and the people most likely to need
-        # lifting out of a suspension are the ones who outrank whoever is on duty.
-        refusal = restorative_refusal_reason(ctx.author, member, self.bot.user.id)
+        refusal = refusal_reason(ctx.author, member, self.bot.user.id)
         if refusal:
             await ctx.send(embed=build_notice_embed(refusal, success=False))
             return

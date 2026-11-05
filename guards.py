@@ -196,26 +196,18 @@ def is_protected(user_id: int) -> bool:
     return user_id in PROTECTED_USER_IDS or user_id in OWNER_IDS
 
 
-def outranks_or_equals(
-    actor: discord.Member,
-    target: discord.Member,
-    *,
-    allow_equal: bool = False,
-) -> bool:
-    """True when the target is too senior for the actor to act on, by EITHER measure.
+def outranks_or_equals(actor: discord.Member, target: discord.Member) -> bool:
+    """True when the target sits at or above the actor, by EITHER measure.
 
     Discord role position and the bot's tier ladder are independent: a Moderator
     whose role happens to sit high in the role list would otherwise be able to
     action a Management member whose role sits low. Either measure placing the
-    target above the actor is enough to refuse.
-
-    With allow_equal, only someone strictly above is refused, so peers can act on
-    each other. Equal on one measure still loses to the other being above.
+    target level with or above the actor is enough to refuse.
     """
     if actor.id == actor.guild.owner_id:
         return False
 
-    if target.top_role > actor.top_role if allow_equal else target.top_role >= actor.top_role:
+    if target.top_role >= actor.top_role:
         return True
 
     target_tier = member_tier_index(target)
@@ -224,31 +216,7 @@ def outranks_or_equals(
     actor_tier = member_tier_index(actor)
     if actor_tier is None:
         return True
-    return target_tier > actor_tier if allow_equal else target_tier >= actor_tier
-
-
-def restorative_refusal_reason(
-    actor: discord.abc.User,
-    target: discord.abc.User,
-    bot_user_id: int,
-) -> str | None:
-    """Why a *restorative* action against this target must not proceed.
-
-    Giving something back is not a punishment, so rank is deliberately not
-    consulted here. A suspended member has had their roles stripped, so they
-    cannot act for themselves, and the people most likely to need lifting out of
-    it are the ones who outrank whoever is on duty. Refusing on hierarchy would
-    leave a suspended Management member with nobody able to restore them.
-
-    Self is still refused: a suspended moderator who kept their tier through a
-    user-ID list would otherwise be able to undo their own suspension. !bypass
-    exists for deliberate self-recovery.
-    """
-    if target.id == actor.id:
-        return "You can't use that on yourself."
-    if target.id == bot_user_id:
-        return "You can't use that on me."
-    return None
+    return target_tier >= actor_tier
 
 
 def refusal_reason(
@@ -257,15 +225,11 @@ def refusal_reason(
     bot_user_id: int,
     *,
     check_hierarchy: bool = True,
-    allow_equal: bool = False,
 ) -> str | None:
     """Why a moderation action against this target must not proceed, or None if it may.
 
     Consolidates the self/bot/protected/owner/hierarchy checks that every moderation
     command needs, so they can't drift apart or be forgotten on a new command.
-
-    allow_equal lets peers act on each other while still refusing anyone above,
-    for actions where that is wanted. Someone strictly above is always refused.
     """
     if target.id == actor.id:
         return "You can't use that on yourself."
@@ -277,11 +241,7 @@ def refusal_reason(
     if isinstance(target, discord.Member):
         if target.id == target.guild.owner_id:
             return f"**{target}** owns this server and can't be moderated."
-        if check_hierarchy and outranks_or_equals(actor, target, allow_equal=allow_equal):
-            return (
-                "You can't action someone ranked above you."
-                if allow_equal
-                else "You can't action someone ranked equal to or above you."
-            )
+        if check_hierarchy and outranks_or_equals(actor, target):
+            return "You can't action someone ranked equal to or above you."
 
     return None
