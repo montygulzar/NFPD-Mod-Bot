@@ -13,8 +13,8 @@ from database import (
     remove_temp_ban,
     save_suspended_member,
 )
-from embeds import audit_reason, build_ban_dm_embed, build_dm_notice_embed, build_notice_embed
-from guards import has_tier, refusal_reason
+from embeds import audit_reason, build_ban_dm_embed, build_dm_notice_embed, build_notice_embed, clamp
+from guards import has_tier, refusal_reason, restorative_refusal_reason
 from modlog import announce_case, record_case, try_dm
 from views import BanAppealView
 
@@ -361,7 +361,10 @@ class Moderation(commands.Cog):
     @has_tier("mod")
     @commands.bot_has_permissions(manage_roles=True)
     async def unsuspend(self, ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
-        refusal = refusal_reason(ctx.author, member, self.bot.user.id)
+        # Restorative, so rank is not consulted: a suspended member has no roles
+        # left and cannot act for themselves, and the people most likely to need
+        # lifting out of a suspension are the ones who outrank whoever is on duty.
+        refusal = restorative_refusal_reason(ctx.author, member, self.bot.user.id)
         if refusal:
             await ctx.send(embed=build_notice_embed(refusal, success=False))
             return
@@ -380,10 +383,16 @@ class Moderation(commands.Cog):
         suspended_role = ctx.guild.get_role(suspended_role_id) if suspended_role_id else None
 
         bot_top = ctx.guild.me.top_role
-        roles_to_add = [
-            ctx.guild.get_role(rid) for rid in saved_role_ids
-        ]
-        roles_to_add = [r for r in roles_to_add if r is not None and r < bot_top]
+        roles_to_add: list[discord.Role] = []
+        unreachable: list[discord.Role] = []
+        for role_id in saved_role_ids:
+            role = ctx.guild.get_role(role_id)
+            if role is None:
+                continue  # Deleted since the suspension; nothing to restore.
+            # Silently dropping these would lose the record of what they held, since
+            # the saved list is deleted below either way. Name them instead so the
+            # roles can be put back by hand once my position is fixed.
+            (roles_to_add if role < bot_top else unreachable).append(role)
 
         try:
             if roles_to_add:
@@ -398,6 +407,16 @@ class Moderation(commands.Cog):
         await remove_suspended_member(ctx.guild.id, member.id)
         embed = await record_case(ctx.guild, member, ctx.author, "unsuspend", reason)
         embed.add_field(name="Roles restored", value=str(len(roles_to_add)), inline=True)
+        if unreachable:
+            embed.add_field(
+                name=f"⚠  Could not restore ({len(unreachable)})",
+                value=clamp(
+                    ", ".join(r.mention for r in unreachable)
+                    + "\nThese sit at or above my highest role. Move my role above them "
+                      "and add these back by hand.",
+                ),
+                inline=False,
+            )
         await ctx.send(embed=embed)
 
 
